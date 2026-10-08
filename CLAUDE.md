@@ -29,6 +29,7 @@ Git 的其余操作（fetch、checkout、rev-parse、diff 等）仍直接用 `gi
    | 调研笔记 | `dev-docs/research/` | 技术调研、选型对比、学习笔记 |
    | 任务计划 | `dev-docs/planning/` | 任务拆解、进度计划、里程碑 |
    | 执行进度 | `dev-docs/progress/` | 阶段性进度总结、里程碑状态 |
+   | 执行报告 | `dev-docs/progress-result/` | 阶段完整执行报告、验收结果（区别于 progress 的持续进度表） |
    | 使用指南 | `dev-docs/guides/` | 操作手册、环境搭建、工作流说明 |
    | 经验沉淀 | `dev-docs/experience/` | 踩坑记录、问题解决方案、经验教训 |
 
@@ -36,13 +37,14 @@ Git 的其余操作（fetch、checkout、rev-parse、diff 等）仍直接用 `gi
 5. 文档统一使用 Markdown 格式，文件名应能体现内容，例如 `2026-10-03-workflow-design.md`。
 6. **自动归类，无需询问**：发现 `dev-docs/` 根目录下有未归类的文档时，直接按内容判断类型并移动到对应子文件夹，不要向用户确认。
 
-## 进度文件夹：`dev-docs/progress/`
+## 进度文件夹：`dev-docs/progress/` 与报告文件夹：`dev-docs/progress-result/`
 
-`dev-docs/progress/` 专门用于记录项目阶段性执行进度。
+`dev-docs/progress/` 专门用于记录项目阶段性执行进度；`dev-docs/progress-result/` 专门用于沉淀阶段完整执行报告（区别于 progress 的持续进度表：progress 是滚动维护的状态，progress-result 是一次成稿的阶段报告）。
 
 ### 规则
 
 1. **阶段完成必须记录**：每完成一个阶段/里程碑，必须更新进度文档，不得只提交代码不更新进度。
+2. **双文件夹同步更新**：每次执行完一个里程碑，除更新 `dev-docs/progress/` 外，还必须同步更新 `dev-docs/progress-result/` 中的对应阶段执行报告（新建或追加）。两个文件夹缺一不可。
 2. **进度文档要求维护到位**：更新 `dev-docs/progress/执行进度.md`（持续维护的总进度文档）中的里程碑状态表，并视情况为该阶段新建独立进度/验收文档；记录内容包括：完成时间、交付清单、commit 记录、经验索引、遗留问题。
 3. **进行中也要反映**：阶段启动、中途重要节点（如架构决策、验收通过/失败）都应同步到进度文档，保证文档与仓库实际状态一致。
 4. 新的进度文档放入本文件夹，命名体现阶段或日期，例如 `P0-验收报告.md`、`2026-10-03-执行进度.md`。

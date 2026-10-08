@@ -5,11 +5,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "collect": "node src/cli.ts",
-    "typecheck": "tsc --noEmit"
+    "collect": "node src/cli.ts collect",
+    "typecheck": "tsc --noEmit",
+    "analyze": "node src/cli.ts analyze",
+    "verify": "node src/knowledge/verify.ts"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
   }
 }

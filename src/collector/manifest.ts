@@ -36,6 +36,7 @@ export interface Manifest {
   };
   filters: {
     max_file_bytes: number;
+    max_text_source_bytes: number;
     ignored_dirs: string[];
     excluded_binary: number;
     excluded_oversized: number;
@@ -77,6 +78,12 @@ const SPDX_PATTERNS: Array<[string, RegExp]> = [
 ];
 
 const MAX_FILE_BYTES = 512 * 1024;
+/** 文本源码扩展名：真实源码可能很大（如单文件服务），上限放宽到 2MB，避免误杀 */
+const TEXT_SOURCE_EXT = new Set([
+  "js", "mjs", "cjs", "ts", "tsx", "jsx", "json", "md", "html", "css", "scss",
+  "yml", "yaml", "sh", "py", "txt", "xml", "toml",
+]);
+const MAX_TEXT_SOURCE_BYTES = 2 * 1024 * 1024;
 
 function isIgnoredDir(relPath: string): boolean {
   return relPath.split("/").some((seg) => IGNORED_DIRS.has(seg));
@@ -161,13 +168,14 @@ export function buildManifest(handle: RepositoryHandle, ref: string): Manifest {
       continue; // 文件读取失败（符号链接断裂等）直接跳过
     }
 
-    if (size > MAX_FILE_BYTES) {
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+    const sizeLimit = TEXT_SOURCE_EXT.has(ext) ? MAX_TEXT_SOURCE_BYTES : MAX_FILE_BYTES;
+    if (size > sizeLimit) {
       excludedOversized++;
       continue;
     }
 
-    const ext = path.extname(filePath).slice(1).toLowerCase();
-    if (BINARY_EXT.has(ext) || (ext === "" && looksBinary(absPath)) || (!BINARY_EXT.has(ext) && looksBinary(absPath))) {
+    if (BINARY_EXT.has(ext) || looksBinary(absPath)) {
       excludedBinary++;
       continue;
     }
@@ -190,6 +198,7 @@ export function buildManifest(handle: RepositoryHandle, ref: string): Manifest {
     license: detectLicense(repoDir, tracked),
     filters: {
       max_file_bytes: MAX_FILE_BYTES,
+      max_text_source_bytes: MAX_TEXT_SOURCE_BYTES,
       ignored_dirs: [...ignoredDirs].sort(),
       excluded_binary: excludedBinary,
       excluded_oversized: excludedOversized,
