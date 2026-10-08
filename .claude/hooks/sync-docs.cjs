@@ -2,32 +2,34 @@
 /**
  * 文档同步 Hook (Claude Code PostToolUse)
  *
- * 作用：把项目内的 Markdown 文档（新增 / 修改 / 删除）
- *      自动镜像到 Obsidian 知识库的 40_Projects/<项目名>/ 目录下。
+ * 作用：把项目内值得存档的 Markdown 文档自动镜像到 Obsidian 知识库的
+ *      40_Projects/<项目名>/ 目录下，按文档类型分类存放。
  *
  * 触发：由 .claude/settings.local.json 的 PostToolUse hook 调用，
  *      匹配 Write|Edit|MultiEdit（新增 / 修改）与 Bash（删除）。
  *
+ * 文档分类（3 层模型）：
+ *   L1 工程知识（当前有效）  → docs/、根目录文档        → 同步
+ *   L2 开发过程（可追溯）    → dev-docs/ 大部分子目录    → 不同步（留 Git）
+ *   L3 经验知识（跨项目复用）→ dev-docs/experience/     → 同步
+ *
+ * 同步前会读取文档内容做质量过滤：
+ *   - 空文件 / 过短（< 100 字符）→ 跳过
+ *   - 纯模板骨架（只有占位符无实际内容）→ 跳过
+ *   - 有效内容 < 3 行 → 跳过
+ *
  * 目标路径解析顺序：
  *   1. OBSIDIAN_DOCS_ROOT 环境变量 = 完整路径（最高优先级，跳过自动检测）
  *   2. obsidian vault 命令自动获取 vault 根 → 拼接 40_Projects/<项目名>/
- *      - 项目名：命令行参数 > SYNC_DOCS_PROJECT_NAME 环境变量 > 项目目录名
- *   3. OBSIDIAN_VAULT_ROOT 环境变量 = 覆盖 vault 根（obsidian CLI 不可用时）
- *
- * 规则：
- *   - 仅同步 .md 文件
- *   - 排除 .git、node_modules、dist 等目录（可通过 SYNC_DOCS_EXCLUDE 扩展）
- *   - Obsidian 内保持相对仓库根的目录结构
+ *   3. OBSIDIAN_VAULT_ROOT 环境变量 = 覆盖 vault 根
  *
  * 可配置（环境变量）：
  *   - OBSIDIAN_VAULT_ROOT       覆盖 vault 根目录（默认运行 obsidian vault 自动获取）
- *   - SYNC_DOCS_PROJECT_NAME    覆盖项目名（默认取项目目录名）
+ *   - SYNC_DOCS_PROJECT_NAME     覆盖项目名（默认取项目目录名）
  *   - OBSIDIAN_DOCS_ROOT        完整目标路径（最高优先级，跳过自动检测）
- *   - SYNC_DOCS_EXCLUDE         追加排除目录（逗号分隔，如 "vendor,build"）
- *   - SYNC_DOCS_VERBOSE=1       输出同步日志（默认静默）
- *
- * 本脚本不含任何机器特定路径，便于随仓库共享。
- * vault 根目录通过 obsidian vault 命令自动获取，无需手动配置。
+ *   - SYNC_DOCS_EXCLUDE          追加排除目录（逗号分隔，如 "vendor,build"）
+ *   - SYNC_DOCS_DEV_DIRS        dev-docs 下需同步的子目录（逗号分隔，默认 "experience"）
+ *   - SYNC_DOCS_VERBOSE=1        输出同步日志（默认静默）
  */
 
 const fs = require('fs');
@@ -52,6 +54,14 @@ const EXCLUDE_DIRS = [
 ];
 // vault 内的项目存放目录
 const VAULT_PROJECTS_DIR = '40_Projects';
+// dev-docs 下需同步到 Obsidian 的子目录（L3 经验知识类）
+const SYNC_DEV_DIRS = (process.env.SYNC_DOCS_DEV_DIRS || 'experience')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+// 内容过滤阈值
+const MIN_CONTENT_LENGTH = 100;
+const MIN_EFFECTIVE_LINES = 3;
 // ==================
 
 const log = (...a) => {
@@ -59,7 +69,6 @@ const log = (...a) => {
 };
 
 // 自动检测 Obsidian vault 根目录
-// 优先级：OBSIDIAN_VAULT_ROOT 环境变量 > obsidian vault 命令输出
 function detectVaultRoot() {
     if (process.env.OBSIDIAN_VAULT_ROOT) return process.env.OBSIDIAN_VAULT_ROOT;
     try {
@@ -68,7 +77,6 @@ function detectVaultRoot() {
             timeout: 5000,
             stdio: 'pipe',
         });
-        // 输出格式：name<TAB或空格>vault名\npath<TAB或空格>路径\n...
         const match = output.match(/^path\s+(.+)$/m);
         return match ? match[1].trim() : null;
     } catch {
@@ -78,10 +86,7 @@ function detectVaultRoot() {
 
 // 解析 Obsidian 同步目标根目录
 function resolveObsidianRoot(projectNameOverride) {
-    // 1. 完整路径（最高优先级，跳过自动检测）
     if (process.env.OBSIDIAN_DOCS_ROOT) return process.env.OBSIDIAN_DOCS_ROOT;
-
-    // 2. 自动检测 vault 根 → 拼接 40_Projects/<项目名>/
     const vaultRoot = detectVaultRoot();
     if (vaultRoot) {
         const name =
@@ -90,11 +95,9 @@ function resolveObsidianRoot(projectNameOverride) {
             path.basename(PROJECT_ROOT);
         return path.join(vaultRoot, VAULT_PROJECTS_DIR, name);
     }
-
     return '';
 }
 
-// 命令行参数 = 可选的项目名覆盖（不再是完整路径）
 const OBSIDIAN_ROOT = resolveObsidianRoot(process.argv[2] || '');
 
 // 读取 stdin（带超时保险，防止异常情况下挂起阻塞工具）
@@ -123,8 +126,8 @@ function toRel(absPath) {
     return rel.split(path.sep).join('/');
 }
 
-// 是否为应跟踪的项目内 .md 文档
-function isTrackable(absPath) {
+// 是否为 .md 文件且不在排除目录内
+function isMdNotExcluded(absPath) {
     if (!absPath || !absPath.toLowerCase().endsWith(DOC_EXT)) return false;
     const rel = toRel(absPath);
     if (!rel) return false;
@@ -137,27 +140,144 @@ function ensureDirFor(filePath) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
-// 新增 / 修改：复制到 Obsidian
-function syncFile(absPath) {
-    if (!isTrackable(absPath)) return false;
-    if (!fs.existsSync(absPath)) return false; // 源已不存在
+// ===== 文档分类 =====
+
+// 路径分类：根据文件相对路径判断是否同步及目标路径
+// 返回 { sync: bool, reason?: string, targetRel?: string }
+function classifyByPath(rel) {
+    const parts = rel.split('/');
+    const fileName = parts[parts.length - 1];
+    const topDir = parts[0];
+    const subDir = parts.length > 1 ? parts[1] : '';
+
+    // 根目录 .md 文件 → 同步到根（CLAUDE.md / README.md / AGENTS.md 等）
+    if (parts.length === 1) {
+        return { sync: true, targetRel: fileName };
+    }
+
+    // docs/ 下 → 同步，保持原路径（L1 读者向文档）
+    if (topDir === 'docs') {
+        return { sync: true, targetRel: rel };
+    }
+
+    // dev-docs/<子目录>/ → 仅 SYNC_DEV_DIRS 中的子目录同步，重映射到子目录名
+    if (topDir === 'dev-docs') {
+        if (subDir && SYNC_DEV_DIRS.includes(subDir)) {
+            const restPath = parts.slice(2).join('/');
+            return {
+                sync: true,
+                targetRel: restPath ? subDir + '/' + restPath : subDir,
+            };
+        }
+        return {
+            sync: false,
+            reason: 'dev-docs/' + subDir + ' 属于 L2 过程文档，不同步到 Obsidian',
+        };
+    }
+
+    // dev-examples/ → 不同步（沙盒）
+    if (topDir === 'dev-examples') {
+        return { sync: false, reason: 'dev-examples/ 沙盒目录，不同步' };
+    }
+
+    // 其他路径 → 同步，保持原路径
+    return { sync: true, targetRel: rel };
+}
+
+// 内容质量过滤：判断文档是否值得存档
+// 返回 { ok: bool, reason?: string }
+function isWorthSyncing(content) {
+    if (!content || !content.trim()) {
+        return { ok: false, reason: '内容为空' };
+    }
+    if (content.trim().length < MIN_CONTENT_LENGTH) {
+        return { ok: false, reason: '内容过短（<' + MIN_CONTENT_LENGTH + ' 字符），可能为占位文件' };
+    }
+    // 去掉模板占位符和注释后检查剩余内容
+    const stripped = content
+        .replace(/{{[^}]+}}/g, '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/^[\s]*$/, '')
+        .trim();
+    if (stripped.length < MIN_CONTENT_LENGTH / 2) {
+        return { ok: false, reason: '内容为模板骨架，无实际内容' };
+    }
+    // 有效行数太少
+    const lines = content.trim().split('\n').filter((l) => l.trim());
+    if (lines.length < MIN_EFFECTIVE_LINES) {
+        return { ok: false, reason: '有效内容不足 ' + MIN_EFFECTIVE_LINES + ' 行' };
+    }
+    // 全是 TODO / 待填充标记
+    const nonTodoLines = lines.filter((l) => !/^(TODO|待填充|TBD|占位|placeholder)/i.test(l.trim()));
+    if (nonTodoLines.length < MIN_EFFECTIVE_LINES) {
+        return { ok: false, reason: '内容全为 TODO/占位标记' };
+    }
+    return { ok: true };
+}
+
+// 综合分类：路径规则 + 内容质量
+// 返回 { sync: bool, reason?: string, targetRel?: string }
+function classifyDocument(absPath) {
     const rel = toRel(absPath);
-    const dest = path.join(OBSIDIAN_ROOT, ...rel.split('/'));
+    if (!rel) return { sync: false, reason: '不在项目根目录范围内' };
+
+    // 1. 路径分类
+    const pathResult = classifyByPath(rel);
+    if (!pathResult.sync) {
+        return { sync: false, reason: pathResult.reason };
+    }
+
+    // 2. 读取内容做质量过滤
+    let content;
+    try {
+        content = fs.readFileSync(absPath, 'utf8');
+    } catch (e) {
+        return { sync: false, reason: '读取失败: ' + e.message };
+    }
+    const contentResult = isWorthSyncing(content);
+    if (!contentResult.ok) {
+        return { sync: false, reason: contentResult.reason };
+    }
+
+    return { sync: true, targetRel: pathResult.targetRel };
+}
+
+// 仅路径分类（用于删除场景，文件已不存在无法读内容）
+function classifyByPathOnly(absPath) {
+    const rel = toRel(absPath);
+    if (!rel) return { sync: false };
+    if (!rel.toLowerCase().endsWith(DOC_EXT)) return { sync: false };
+    return classifyByPath(rel);
+}
+
+// ===== 同步操作 =====
+
+// 新增 / 修改：读取 → 分类 → 复制到 Obsidian
+function syncFile(absPath) {
+    if (!isMdNotExcluded(absPath)) return false;
+    if (!fs.existsSync(absPath)) return false;
+
+    const result = classifyDocument(absPath);
+    if (!result.sync) {
+        log('skip  ', toRel(absPath), '→', result.reason);
+        return false;
+    }
+
+    const dest = path.join(OBSIDIAN_ROOT, ...result.targetRel.split('/'));
     ensureDirFor(dest);
     fs.copyFileSync(absPath, dest);
-    log('sync ->', dest);
+    log('sync  ', result.targetRel, '->', dest);
     return true;
 }
 
-// 删除：从 Obsidian 移除（做范围校验，避免越界删除）
+// 删除：从 Obsidian 移除（仅路径分类，文件已不存在）
 function removeFile(absPath) {
-    const rel = toRel(absPath);
-    if (!rel) return false; // 必须在仓库范围内
-    if (!rel.toLowerCase().endsWith(DOC_EXT)) return false;
-    const dest = path.join(OBSIDIAN_ROOT, ...rel.split('/'));
+    const result = classifyByPathOnly(absPath);
+    if (!result.sync) return false; // 本来就不同步，无需删除
+    const dest = path.join(OBSIDIAN_ROOT, ...result.targetRel.split('/'));
     if (fs.existsSync(dest)) {
         fs.unlinkSync(dest);
-        log('delete ->', dest);
+        log('delete', result.targetRel, '->', dest);
         return true;
     }
     return false;
@@ -166,10 +286,8 @@ function removeFile(absPath) {
 // 从 Bash 命令中尽力提取被删除的 .md 路径
 function extractDeletedDocs(command) {
     if (!command) return [];
-    // 仅在命令含删除意图时处理
     if (!/(\brm\b|\bdel\b|Remove-Item)/i.test(command)) return [];
     const files = [];
-    // 提取所有 .md 结尾的 token（去掉首尾引号）
     const re = /([^\s'";|&<>]+\.md)/gi;
     let m;
     while ((m = re.exec(command)) !== null) {
@@ -192,7 +310,7 @@ async function main() {
     try {
         payload = JSON.parse(raw);
     } catch {
-        return; // 非 JSON 输入，忽略
+        return;
     }
     const tool = payload.tool_name;
     const input = payload.tool_input || {};

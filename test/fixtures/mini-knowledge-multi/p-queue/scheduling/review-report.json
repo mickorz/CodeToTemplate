@@ -1,6 +1,28 @@
 {
-  "schema_version": "1.0", "passed": true,
+  "schema_version": "1.0",
+  "passed": true,
   "llm": [
-    { "module_id": "scheduling.index", "review_status": "reviewed", "verdicts": [{ "statement": "x", "verdict": "supported", "reason": "y" }] }
-  ]
+    {
+      "module_id": "scheduling.index",
+      "review_status": "reviewed",
+      "verdicts": [
+        {
+          "statement": "通过 concurrency 选项控制并发上限",
+          "verdict": "supported",
+          "reason": "源码支持"
+        },
+        {
+          "statement": "优先级任务经 PriorityQueue 排序后执行",
+          "verdict": "supported",
+          "reason": "源码支持"
+        },
+        {
+          "statement": "支持 pause 暂停与 resume 恢复",
+          "verdict": "supported",
+          "reason": "源码支持"
+        }
+      ]
+    }
+  ],
+  "commit": "bbbb1111222233334444555566667777888899bb"
 }

@@ -20,6 +20,7 @@ import path from "node:path";
 import type { Catalog } from "../catalog/builder.ts";
 import { searchCapabilities } from "../catalog/search.ts";
 import type { ModuleAnalysis } from "../generate/analysis-contract.ts";
+import { buildClaimsForReview, claimsHash, verdictMapFromReview } from "../review/claims.ts";
 
 export interface ReferenceModule {
   repo: string;
@@ -92,13 +93,26 @@ export function buildReferenceContext(
     const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf-8")) : null;
     const reviewPath = path.join(topicDir, "review-report.json");
     let reviewStatus = "unreviewed";
+    let verdictMap = new Map<string, string>();
     if (existsSync(reviewPath)) {
       try {
         const rr = JSON.parse(readFileSync(reviewPath, "utf-8"));
         const entry = (rr.llm ?? []).find((r: any) => r.module_id === module_id);
-        reviewStatus = entry?.review_status ?? (entry?.verdicts?.length ? "reviewed" : "unreviewed");
+        // 时效校验：commit 一致 + 送审内容 hash 一致，旧报告不误用
+        const commitOk = !rr.commit || rr.commit === ma.commit;
+        const hashOk = !entry?.claims_hash || entry.claims_hash === claimsHash(buildClaimsForReview(a));
+        if (entry && commitOk && hashOk && (entry.review_status === "reviewed" || entry.verdicts?.length)) {
+          reviewStatus = "reviewed";
+          verdictMap = verdictMapFromReview(entry);
+        }
       } catch { /* 保持 unreviewed */ }
     }
+
+    // claim 级可信（评审表格）：supported 允许；unsupported 禁止；unverifiable 保留标注；未送审默认过滤（trusted 模式）
+    const annotateFacts = (facts: any[]) =>
+      facts
+        .filter((f) => verdictMap.get(f.statement) !== "unsupported")
+        .map((f) => ({ ...f, claim_status: verdictMap.get(f.statement) ?? "unreviewed-claim" }));
 
     const allFiles = [...new Set([...(a.read_files ?? []), ...(a.source_files ?? [])])];
     references.push({
@@ -113,7 +127,9 @@ export function buildReferenceContext(
       review_status: reviewStatus,
       capability,
       summary: a.summary ?? "",
-      facts: a.facts ?? [],
+      facts: trustedOnly
+        ? annotateFacts(a.facts ?? []).filter((f: any) => f.claim_status !== "unreviewed-claim")
+        : annotateFacts(a.facts ?? []),
       interfaces: a.interfaces ?? [],
       dependencies: a.dependencies ?? { internal_files: [], external_packages: [] },
       source_files: allFiles.filter((f) => !isTestFile(f)),

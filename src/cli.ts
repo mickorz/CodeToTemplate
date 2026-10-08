@@ -347,14 +347,11 @@ async function cmdReview() {
   for (const v of allViolations) console.error(`  - [${v.module_id}] ${v.statement.slice(0, 60)} (${v.reason})`);
 
   // ---- 第二层：LLM 语义审查（抽样：全部 inferences + 机制关键词 facts，上限 15 条/模块，缓存按模块） ----
-  const MECH = /并发|concurren|优先|priority|超时|timeout|暂停|pause|速率|rate|调度|queue|重试/i;
+  const { buildClaimsForReview, claimsHash } = await import("./review/claims.ts");
   const llmResults = [];
   for (const a of ma.analyses) {
-    const claims = [
-      ...(a.inferences ?? []).map((i: any) => i.statement),
-      ...(a.facts ?? []).filter((f: any) => MECH.test(f.statement)).map((f: any) => f.statement),
-      ...(a.execution_flows ?? []).map((fl: any) => `执行流程「${fl.name}」：${fl.steps.map((s: any) => s.action).join(" -> ")}`),
-    ].slice(0, 15);
+    const claims = buildClaimsForReview(a);
+    const curClaimsHash = claimsHash(claims);
     if (!claims.length) { llmResults.push({ module_id: a.module_id, verdicts: [], review_status: "unreviewed", note: "无待审条目（基础契约已过，未经语义审查）" }); continue; }
 
     const cacheId = `review__${a.module_id}`;
@@ -365,6 +362,7 @@ async function cmdReview() {
     if (cached) {
       const entry = JSON.parse(cached);
       entry.review_status = "reviewed";
+      entry.claims_hash = curClaimsHash;
       llmResults.push(entry);
       console.log(`[审查] ${a.module_id} 审查缓存命中`);
       continue;
@@ -385,6 +383,7 @@ async function cmdReview() {
     }
     const result = JSON.parse(run.output);
     result.review_status = "reviewed";
+    result.claims_hash = curClaimsHash; // P2 修复 2：送审内容指纹（catalog 校验时效用）
     llmResults.push(result);
     writeCache(knowledgeDir, cacheId, key, JSON.stringify(result));
     const counts = { s: 0, u: 0, n: 0 };

@@ -8,7 +8,7 @@
 
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { buildCatalog } from "../src/catalog/builder.ts";
+import { buildCatalog, extractCapabilities } from "../src/catalog/builder.ts";
 import { searchCapabilities } from "../src/catalog/search.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -72,6 +72,60 @@ assert(catalog.capabilities.some((c) => c.id === "crash-recovery" && c.modules.s
   const all = searchCapabilities(catalog, "崩溃 重启");
   const firstModule = all.flatMap((h) => h.modules)[0];
   assert(firstModule.review_status === "reviewed" || all.every((h) => h.modules.every((m) => m.review_status !== "reviewed")), "默认排序已审查模块优先");
+}
+
+// P2 评审修复回归：仅有 inference、无对应 verified fact 的模块不得进入可信能力
+{
+  const analysis = {
+    schema_version: "1.0", module_id: "x.infer-only", name: "x", summary: "",
+    facts: [],
+    execution_flows: [], interfaces: [],
+    dependencies: { internal_files: [], external_packages: [] },
+    inferences: [{ statement: "推测支持分布式集群部署", basis: "直觉" }],
+    reuse_guidance: { portable: [], adapt: [], risks: [] },
+    open_questions: [], read_files: [],
+  };
+  const caps = extractCapabilities(analysis, { repo: "t", topic: "t", doc: "t" });
+  assert(!caps.some((c) => c.id === "distributed"), "仅 inference 不触发能力分类（inferences 已移除匹配源）");
+  assert(!caps.some((c) => c.id === "auto_retry"), "inference 中的重试主张不触发能力");
+}
+
+// P2 评审修复回归：unsupported 的事实不作为能力证据
+{
+  const analysis2 = {
+    ...{
+      schema_version: "1.0", module_id: "x.mix", name: "x", summary: "",
+      facts: [
+        { statement: "支持并发限制与优先级调度", status: "verified", evidence: [{ file: "a.ts", lines: [1, 2] }] },
+        { statement: "支持分布式集群部署", status: "verified", evidence: [{ file: "a.ts", lines: [3, 4] }] },
+      ],
+      execution_flows: [], interfaces: [],
+      dependencies: { internal_files: [], external_packages: [] },
+      inferences: [],
+      reuse_guidance: { portable: [], adapt: [], risks: [] },
+      open_questions: [], read_files: [],
+    },
+  };
+  const verdictMap = new Map(["支持分布式集群部署"].map((s) => [s, "unsupported"]));
+  const caps = extractCapabilities(analysis2, { repo: "t", topic: "t", doc: "t" }, verdictMap);
+  const dist = caps.find((c) => c.id === "distributed");
+  assert(!dist || dist.evidence.every((e) => e.statement !== "支持分布式集群部署"), "unsupported 事实不作为能力证据");
+  const conc = caps.find((c) => c.id === "concurrency-limit");
+  assert(!!conc && conc.evidence.length >= 1, "supported 事实正常作为证据");
+}
+
+// P2 评审修复回归：review-report 的 commit 与分析不一致时模块降级 unreviewed
+{
+  const fs = await import("node:fs");
+  const badReview = { passed: true, commit: "f".repeat(40), llm: [{ module_id: "scheduling.index", review_status: "reviewed", verdicts: [] }] };
+  const tmpK = path.join(here, "fixtures", "mini-knowledge-multi-badcommit");
+  fs.cpSync(fixtureRoot, tmpK, { recursive: true });
+  fs.writeFileSync(path.join(tmpK, "p-queue", "scheduling", "review-report.json"), JSON.stringify(badReview));
+  const cat2 = buildCatalog(tmpK);
+  const conc2 = cat2.capabilities.find((c) => c.id === "concurrency-limit");
+  const pq2 = conc2?.modules.find((m) => m.repo === "p-queue");
+  assert(pq2?.review_status === "unreviewed", "旧 commit 的审查报告不生效（时效校验）");
+  fs.rmSync(tmpK, { recursive: true, force: true });
 }
 
 console.log(`\n[结果] 能力索引与检索测试: ${pass} 通过 / ${fail} 失败`);

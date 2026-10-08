@@ -18,6 +18,12 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import type { ModuleAnalysis } from "../generate/analysis-contract.ts";
+import { claimsHash, buildClaimsForReview, verdictMapFromReview } from "../review/claims.ts";
+
+/** 从 analyses 里按 module_id 取模块（claims_hash 校验用） */
+function a0Of(ma: any, moduleId: string): any {
+  return (ma.analyses ?? []).find((x: any) => x.module_id === moduleId) ?? { facts: [], inferences: [], execution_flows: [] };
+}
 
 /** 能力词典：能力 ID -> 识别关键词（中英） */
 export const CAPABILITY_DICT: Record<string, string[]> = {
@@ -57,9 +63,10 @@ export interface Catalog {
   capabilities: CapabilityEntry[];
 }
 
-function evidenceLines(a: ModuleAnalysis, keywordRe: RegExp): CapabilityEntry["modules"][0]["evidence"] {
+function evidenceLines(a: ModuleAnalysis, keywordRe: RegExp, verdictMap?: Map<string, string>): CapabilityEntry["modules"][0]["evidence"] {
   const hits: CapabilityEntry["modules"][0]["evidence"] = [];
   for (const f of a.facts ?? []) {
+    if (verdictMap?.get(f.statement) === "unsupported") continue; // claim 级过滤：被否决的事实不作证据
     if (keywordRe.test(f.statement) && f.evidence?.[0]) {
       hits.push({ statement: f.statement.slice(0, 100), file: f.evidence[0].file, line: f.evidence[0].lines?.[0] });
     }
@@ -68,21 +75,24 @@ function evidenceLines(a: ModuleAnalysis, keywordRe: RegExp): CapabilityEntry["m
   return hits;
 }
 
-/** 从单个模块分析提取命中能力 */
-export function extractCapabilities(a: ModuleAnalysis, meta: { repo: string; topic: string; doc: string }): Array<{ id: string; matched: string[]; evidence: CapabilityEntry["modules"][0]["evidence"] }> {
+/** 从单个模块分析提取命中能力（P2 修复：inferences 移除；verdictMap 提供 claim 级审查，unsupported 事实不参与） */
+export function extractCapabilities(
+  a: ModuleAnalysis,
+  meta: { repo: string; topic: string; doc: string },
+  verdictMap?: Map<string, string>,
+): Array<{ id: string; matched: string[]; evidence: CapabilityEntry["modules"][0]["evidence"] }> {
   const text = [
     a.summary ?? "",
-    ...(a.facts ?? []).map((f) => f.statement),
+    ...(a.facts ?? []).filter((f) => verdictMap?.get(f.statement) !== "unsupported").map((f) => f.statement),
     ...(a.execution_flows ?? []).map((f) => f.name),
-    ...(a.inferences ?? []).map((i) => i.statement),
-  ].join("\n");
+  ].join("\n"); // inferences 有意排除（评审 P2-0b）：推断不得触发能力分类
 
   const out = [];
   for (const [id, kws] of Object.entries(CAPABILITY_DICT)) {
     const matched = kws.filter((k) => text.includes(k) || new RegExp(k, "i").test(text));
     if (!matched.length) continue;
     const kwRe = new RegExp(kws.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i");
-    out.push({ id, matched, evidence: evidenceLines(a, kwRe) });
+    out.push({ id, matched, evidence: evidenceLines(a, kwRe, verdictMap) });
   }
   return out;
 }
@@ -98,17 +108,28 @@ export function buildCatalog(knowledgeRoot: string): Catalog {
       const maPath = path.join(topicDir, "module-analysis.json");
       if (!existsSync(maPath)) continue;
       const ma = JSON.parse(readFileSync(maPath, "utf-8"));
-      // 审查状态：review-report 的 per-module 状态（无报告则全部 unreviewed）
+      // 审查状态与时效校验（P2 修复 2）：commit 一致 + 送审内容 hash 一致才视为有效审查
       const reviewPath = path.join(topicDir, "review-report.json");
       let reviewByModule = new Map<string, string>();
+      let verdictByModule = new Map<string, Map<string, string>>();
       if (existsSync(reviewPath)) {
         try {
           const rr = JSON.parse(readFileSync(reviewPath, "utf-8"));
-          reviewByModule = new Map((rr.llm ?? []).map((r: any) => [r.module_id, r.review_status ?? (r.verdicts?.length ? "reviewed" : "unreviewed")]));
+          const commitOk = !rr.commit || rr.commit === ma.commit;
+          for (const entry of rr.llm ?? []) {
+            let valid = commitOk && entry.review_status === "reviewed";
+            if (valid && entry.claims_hash) {
+              const curHash = claimsHash(buildClaimsForReview(a0Of(ma, entry.module_id)));
+              if (curHash !== entry.claims_hash) valid = false; // 分析已变，旧审查失效
+            }
+            reviewByModule.set(entry.module_id, valid ? "reviewed" : "unreviewed");
+            verdictByModule.set(entry.module_id, verdictMapFromReview(entry));
+          }
         } catch { /* 损坏的 review 报告按 unreviewed 处理 */ }
       }
       for (const a of ma.analyses ?? []) {
-        const caps = extractCapabilities(a, { repo, topic, doc: `${repo}/${topic}` });
+        const verdictMap = verdictByModule.get(a.module_id);
+        const caps = extractCapabilities(a, { repo, topic, doc: `${repo}/${topic}` }, verdictMap);
         for (const c of caps) {
           if (!byCap.has(c.id)) {
             byCap.set(c.id, { id: c.id, keywords: CAPABILITY_DICT[c.id], modules: [] });
