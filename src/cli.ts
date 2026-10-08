@@ -25,6 +25,10 @@ import { buildSourceMap, bfsPath, type SourceMap } from "./analyzer/dependencies
 import { buildDiscoveryContext } from "./discovery/context.ts";
 import { validateModuleMap } from "./discovery/contract.ts";
 import { runAgent } from "./discovery/runner.ts";
+import { validateModuleAnalysis, type ModuleAnalysis } from "./generate/analysis-contract.ts";
+import { renderAll } from "./generate/render.ts";
+import { publish } from "./generate/publisher.ts";
+import { runVerify } from "./knowledge/validator.ts";
 
 const CACHE_ROOT = path.resolve("cache");
 const [cmd, ...rest] = process.argv.slice(2);
@@ -183,11 +187,92 @@ async function cmdDiscover() {
   }
 }
 
+/** P1-2：模块分析 Agent -> 结构化分析 -> 渲染 -> 校验 -> 发布 */
+async function cmdGenerate() {
+  const args = parseArgs({
+    options: {
+      knowledge: { type: "string", default: "./knowledge/openworkbuddy/desktop" },
+      agent: { type: "string", default: "./agents/mock-analyze.mjs" },
+      "module-map": { type: "string" },
+      assertions: { type: "string", default: "./test/gold-set/openworkbuddy-assertions.json" },
+    },
+    strict: true,
+    args: rest,
+  });
+
+  const knowledgeDir = path.resolve(args.values.knowledge);
+  const manifest = loadJson<Manifest>(path.join(knowledgeDir, "repository-manifest.json"));
+  const repoDir = path.join(CACHE_ROOT, "repos", manifest.repository.replace("/", "__"));
+  if (!existsSync(repoDir)) fatal(`本地缓存仓库不存在: ${repoDir}，请先执行 collect`);
+
+  const moduleMapPath = path.resolve(args.values["module-map"] ?? path.join(knowledgeDir, "module-map.json"));
+  const moduleMap = loadJson<{ modules: any[] }>(moduleMapPath);
+  const manifestPaths = new Set(manifest.files.map((f) => f.path));
+
+  // 1. 分析上下文（Agent 唯一输入：模块定义 + 白名单，无 gold-set）
+  const analysisContext = {
+    repository: manifest.repository,
+    commit: manifest.commit,
+    whitelist: [...manifestPaths],
+    modules: moduleMap.modules.map((m: any) => ({
+      id: m.id, name: m.name, summary: m.summary,
+      source_files: m.source_files.filter((f: string) => manifestPaths.has(f)),
+      dependencies: m.dependencies ?? [],
+    })),
+  };
+  const ctxPath = path.join(knowledgeDir, "analysis-context.json");
+  writeFileSync(ctxPath, JSON.stringify(analysisContext, null, 2), "utf-8");
+  console.log(`[生成] 分析上下文已生成: ${ctxPath}（${analysisContext.modules.length} 模块，白名单 ${analysisContext.whitelist.length}）`);
+
+  // 2. 运行分析 Agent（受控读取协议复用 P1-1 runner）
+  const result = await runAgent(args.values.agent, ctxPath, repoDir, manifestPaths);
+  if (!result.ok || !result.output) fatal(`分析 Agent 失败: ${result.error}`);
+  console.log(`[生成] 分析 Agent 完成，协议读取 ${result.readLog.length} 个文件`);
+
+  // 3. 逐模块契约校验（证据边界：facts 引用必须在白名单且已读）
+  const parsed = JSON.parse(result.output);
+  const analyses: ModuleAnalysis[] = [];
+  for (const a of parsed.analyses) {
+    const contract = validateModuleAnalysis(JSON.stringify(a), manifestPaths);
+    if (!contract.ok) {
+      console.error(`[生成] 模块 ${a.module_id} 契约失败:`);
+      for (const e of contract.errors) console.error(`  - ${e}`);
+      process.exit(1);
+    }
+    analyses.push(contract.analysis!);
+  }
+  writeFileSync(path.join(knowledgeDir, "module-analysis.json"), result.output, "utf-8");
+  console.log(`[生成] 契约校验通过：${analyses.length} 个模块分析已写出 module-analysis.json`);
+
+  // 4. 渲染 Markdown 到 generated/（不覆盖手写产物）
+  const rendered = renderAll(analyses, { repository: manifest.repository, commit: manifest.commit });
+  const genDir = path.join(knowledgeDir, "generated", "modules");
+  mkdirSync(genDir, { recursive: true });
+  for (const [name, md] of Object.entries(rendered)) {
+    writeFileSync(path.join(genDir, name), md, "utf-8");
+  }
+  console.log(`[生成] 已渲染 ${Object.keys(rendered).length} 份文档到 generated/modules/`);
+
+  // 5. 确定性校验（写 deterministic-report.json）+ Publisher 汇总
+  const assertionsPath = path.resolve(args.values.assertions);
+  const assertions = existsSync(assertionsPath) ? JSON.parse(readFileSync(assertionsPath, "utf-8")) : [];
+  const verify = runVerify(knowledgeDir, repoDir, assertions);
+  writeFileSync(
+    path.join(knowledgeDir, "deterministic-report.json"),
+    JSON.stringify({ repository: manifest.repository, commit: manifest.commit, deterministic_checks: verify.checks, passed: verify.passed }, null, 2),
+    "utf-8",
+  );
+  const pub = publish(knowledgeDir);
+  console.log(`[生成] Publisher 汇总: overall=${pub.overall_passed ? "通过" : "失败"}（deterministic=${verify.passed ? "通过" : "失败"}${pub.sections["review-report"]?.present ? ", review 存在" : ", review 缺席"}${pub.sections["e2e-report"]?.present ? ", e2e 存在" : ", e2e 缺席"}）`);
+  if (!verify.passed) process.exit(1);
+}
+
 switch (cmd) {
   case "collect": cmdCollect(); break;
   case "analyze": cmdAnalyze(); break;
   case "trace": cmdTrace(); break;
   case "discover": await cmdDiscover(); break;
+  case "generate": await cmdGenerate(); break;
   default:
-    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover`);
+    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover / generate`);
 }

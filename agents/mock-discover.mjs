@@ -12,6 +12,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { makeLineReader } from "./lib/line-protocol.mjs";
 
 const contextPath = process.argv[2];
 if (!contextPath) {
@@ -20,25 +21,17 @@ if (!contextPath) {
 }
 
 const ctx = JSON.parse(readFileSync(contextPath, "utf-8"));
+const readLine = makeLineReader();
 
 // --- 受控读取协议：stdout 请求，stdin 应答 ---
 function request(payload) {
   process.stdout.write(JSON.stringify(payload) + "\n");
 }
 
-function readViaProtocol(path) {
-  return new Promise((resolve) => {
-    const onData = (buf) => {
-      const lines = buf.toString().split("\n").filter((l) => l.trim());
-      if (!lines.length) return;
-      let resp;
-      try { resp = JSON.parse(lines[lines.length - 1]); } catch { return; }
-      process.stdin.removeListener("data", onData);
-      resolve(resp);
-    };
-    process.stdin.on("data", onData);
-    request({ op: "read_file", path });
-  });
+async function readViaProtocol(path) {
+  request({ op: "read_file", path });
+  const line = await readLine();
+  try { return JSON.parse(line); } catch { return { ok: false, error: "协议应答解析失败" }; }
 }
 
 /** 从文件头注释行提取摘要（通用启发式） */

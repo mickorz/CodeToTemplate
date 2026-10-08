@@ -164,8 +164,9 @@ if (process.argv[1] && process.argv[1].endsWith("validator.ts")) {
   }
 
   const manifest = JSON.parse(readFileSync(path.join(knowledgeDir, "repository-manifest.json"), "utf-8"));
+  // P1-2 起只写 deterministic-report.json，汇总归 Publisher，单项检查不得覆盖已有证据
   writeFileSync(
-    path.join(knowledgeDir, "verification-report.json"),
+    path.join(knowledgeDir, "deterministic-report.json"),
     JSON.stringify({
       schema_version: "1.0",
       repository: manifest.repository,
@@ -175,6 +176,6 @@ if (process.argv[1] && process.argv[1].endsWith("validator.ts")) {
     }, null, 2),
     "utf-8",
   );
-  console.log(`[校验] 报告已写入 verification-report.json，结论: ${passed ? "通过" : "失败"}`);
+  console.log(`[校验] 报告已写入 deterministic-report.json，结论: ${passed ? "通过" : "失败"}（汇总由 Publisher 负责）`);
   process.exit(passed ? 0 : 1);
 }
