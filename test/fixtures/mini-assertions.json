@@ -1,0 +1,22 @@
+[
+  {
+    "file": "entry.js",
+    "from": 2,
+    "to": 4,
+    "tokens": [
+      "require",
+      "500, 2000, 5000"
+    ],
+    "claim": "入口依赖监护与退避参数"
+  },
+  {
+    "file": "src/supervisor.js",
+    "from": 1,
+    "to": 6,
+    "tokens": [
+      "20000",
+      "module.exports"
+    ],
+    "claim": "就绪常量与导出"
+  }
+]

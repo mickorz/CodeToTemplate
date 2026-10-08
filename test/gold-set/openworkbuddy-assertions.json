@@ -1,0 +1,10 @@
+[
+  { "file": "electron-main.js", "from": 1580, "to": 1590, "tokens": ["utilityProcess.fork", "server-host.js"], "claim": "G04 服务端运行于 Utility Process" },
+  { "file": "electron-main.js", "from": 775, "to": 779, "tokens": ["server.js"], "claim": "inproc 回退 require server.js" },
+  { "file": "electron-main.js", "from": 730, "to": 736, "tokens": ["loadURL"], "claim": "G03 页面加载本机服务" },
+  { "file": "electron-main.js", "from": 790, "to": 795, "tokens": ["/api/info"], "claim": "健康检查探测 api info" },
+  { "file": "src/desktop/server-supervisor.js", "from": 20, "to": 26, "tokens": ["20000", "180000", "180000", "500, 2000, 5000"], "claim": "G05 崩溃退避参数（20s 就绪/5min 窗口/退避序列）" },
+  { "file": "src/desktop/bridge-main.js", "from": 1, "to": 30, "tokens": ["t:\"call\"", "t:\"ret\"", "t:\"note\""], "claim": "G06 桥接消息协议 call ret note" },
+  { "file": "src/platform/electron-bridge.js", "from": 25, "to": 45, "tokens": ["5000", "inproc", "remote", "none"], "claim": "三模式与超时常量" },
+  { "file": "electron-builder.config.js", "from": 1, "to": 40, "tokens": ["asar", "CSC_IDENTITY_AUTO_DISCOVERY"], "claim": "G07 打包配置 asar 与签名策略" }
+]

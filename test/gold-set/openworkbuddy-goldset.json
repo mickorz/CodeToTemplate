@@ -1,0 +1,15 @@
+{
+  "repository": "mickorz/openworkbuddy",
+  "commit": "3e4365b123dc98c7c32e768b5f4e53598513d2f2",
+  "description": "OpenWorkBuddy 桌面端 Gold Set 基准（P0 人工核对版，2026-10-08）。仅用于验收对照，禁止进入任何生成 Agent 的提示词。",
+  "facts": [
+    { "id": "G01", "fact": "桌面端使用 Electron", "reference": "package.json" },
+    { "id": "G02", "fact": "主进程创建 BrowserWindow", "reference": "electron-main.js:618" },
+    { "id": "G03", "fact": "页面加载本机 HTTP 服务", "reference": "electron-main.js:792,734" },
+    { "id": "G04", "fact": "服务端可运行于 Utility Process", "reference": "electron-main.js:1585, server-host.js" },
+    { "id": "G05", "fact": "服务监护包含崩溃重启和回退", "reference": "src/desktop/server-supervisor.js:20-25" },
+    { "id": "G06", "fact": "服务与主进程之间有原生桥接", "reference": "src/desktop/bridge-main.js, src/platform/electron-bridge.js" },
+    { "id": "G07", "fact": "打包同时支持 Windows 和 macOS", "reference": "package.json scripts, electron-builder.config.js" },
+    { "id": "G08", "fact": "桌面、Web、CLI 共用底层业务能力", "reference": "server.js, cli.js" }
+  ]
+}

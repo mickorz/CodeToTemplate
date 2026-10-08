@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "repository": "example/mini-repo",
+  "remote": "https://github.com/example/mini-repo",
+  "ref": "main",
+  "commit": "aaaa1111bbbb2222cccc3333dddd4444eeee5555",
+  "license": { "spdx": "MIT", "package_json_field": "MIT", "license_file": "LICENSE" },
+  "filters": { "max_file_bytes": 524288, "max_text_source_bytes": 2097152, "ignored_dirs": [], "excluded_binary": 0, "excluded_oversized": 0 },
+  "file_count": 3,
+  "total_bytes": 350,
+  "files": [
+    { "path": "entry.js", "bytes": 150, "blob_sha": "b1" },
+    { "path": "src/supervisor.js", "bytes": 130, "blob_sha": "b2" },
+    { "path": "src/util.js", "bytes": 70, "blob_sha": "b3" }
+  ]
+}

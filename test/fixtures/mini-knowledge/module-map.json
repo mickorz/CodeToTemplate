@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "repository": "example/mini-repo",
+  "commit": "aaaa1111bbbb2222cccc3333dddd4444eeee5555",
+  "topic": "test",
+  "modules": [
+    {
+      "id": "test.supervisor",
+      "name": "假监护模块",
+      "summary": "测试用",
+      "source_files": ["entry.js", "src/supervisor.js"],
+      "dependencies": ["test.util"],
+      "confidence": "high"
+    },
+    {
+      "id": "test.util",
+      "name": "假工具模块",
+      "summary": "测试用",
+      "source_files": ["src/util.js"],
+      "dependencies": [],
+      "confidence": "high"
+    }
+  ]
+}
