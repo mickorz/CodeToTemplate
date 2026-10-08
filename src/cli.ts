@@ -29,6 +29,8 @@ import { validateModuleAnalysis, type ModuleAnalysis } from "./generate/analysis
 import { renderAll } from "./generate/render.ts";
 import { publish } from "./generate/publisher.ts";
 import { runVerify } from "./knowledge/validator.ts";
+import { runGenerateEngine } from "./generate/engine.ts";
+import { normalizeAnalysis } from "./generate/normalize.ts";
 
 const CACHE_ROOT = path.resolve("cache");
 const [cmd, ...rest] = process.argv.slice(2);
@@ -187,7 +189,7 @@ async function cmdDiscover() {
   }
 }
 
-/** P1-2：模块分析 Agent -> 结构化分析 -> 渲染 -> 校验 -> 发布 */
+/** P1-2/P1-4：模块分析引擎（缓存/Journal/单模块/失败隔离/2 并发）-> 渲染 -> 校验 -> 发布 */
 async function cmdGenerate() {
   const args = parseArgs({
     options: {
@@ -195,6 +197,9 @@ async function cmdGenerate() {
       agent: { type: "string", default: "./agents/mock-analyze.mjs" },
       "module-map": { type: "string" },
       assertions: { type: "string", default: "./test/gold-set/openworkbuddy-assertions.json" },
+      only: { type: "string" },            // 逗号分隔：只分析这些模块
+      "refresh-module": { type: "string" }, // 逗号分隔：强制重分析（忽略缓存）
+      resume: { type: "boolean", default: false },
     },
     strict: true,
     args: rest,
@@ -208,43 +213,43 @@ async function cmdGenerate() {
   const moduleMapPath = path.resolve(args.values["module-map"] ?? path.join(knowledgeDir, "module-map.json"));
   const moduleMap = loadJson<{ modules: any[] }>(moduleMapPath);
   const manifestPaths = new Set(manifest.files.map((f) => f.path));
+  const modules = moduleMap.modules.map((m: any) => ({
+    id: m.id, name: m.name, summary: m.summary,
+    source_files: (m.source_files as string[]).filter((f) => manifestPaths.has(f)),
+    dependencies: m.dependencies ?? [],
+  }));
 
-  // 1. 分析上下文（Agent 唯一输入：模块定义 + 白名单，无 gold-set）
-  const analysisContext = {
-    repository: manifest.repository,
-    commit: manifest.commit,
-    whitelist: [...manifestPaths],
-    modules: moduleMap.modules.map((m: any) => ({
-      id: m.id, name: m.name, summary: m.summary,
-      source_files: m.source_files.filter((f: string) => manifestPaths.has(f)),
-      dependencies: m.dependencies ?? [],
-    })),
-  };
-  const ctxPath = path.join(knowledgeDir, "analysis-context.json");
-  writeFileSync(ctxPath, JSON.stringify(analysisContext, null, 2), "utf-8");
-  console.log(`[生成] 分析上下文已生成: ${ctxPath}（${analysisContext.modules.length} 模块，白名单 ${analysisContext.whitelist.length}）`);
+  console.log(`[生成] 模块 ${modules.length} 个，agent=${args.values.agent}${args.values.only ? `，only=${args.values.only}` : ""}`);
 
-  // 2. 运行分析 Agent（受控读取协议复用 P1-1 runner）
-  const result = await runAgent(args.values.agent, ctxPath, repoDir, manifestPaths);
-  if (!result.ok || !result.output) fatal(`分析 Agent 失败: ${result.error}`);
-  console.log(`[生成] 分析 Agent 完成，协议读取 ${result.readLog.length} 个文件`);
+  // 1. 逐模块引擎（缓存/失败隔离/2 并发）
+  const engine = await runGenerateEngine({
+    knowledgeDir, repoDir, manifest, modules,
+    agentScript: args.values.agent,
+    agentCmdLabel: args.values.agent,
+    only: args.values.only?.split(",").map((s) => s.trim()).filter(Boolean),
+    refreshModules: args.values["refresh-module"]?.split(",").map((s) => s.trim()).filter(Boolean),
+    resume: args.values.resume === true,
+  });
 
-  // 3. 逐模块契约校验（证据边界：facts 引用必须在白名单且已读）
-  const parsed = JSON.parse(result.output);
-  const analyses: ModuleAnalysis[] = [];
-  for (const a of parsed.analyses) {
-    const contract = validateModuleAnalysis(JSON.stringify(a), manifestPaths);
-    if (!contract.ok) {
-      console.error(`[生成] 模块 ${a.module_id} 契约失败:`);
-      for (const e of contract.errors) console.error(`  - ${e}`);
-      process.exit(1);
-    }
-    analyses.push(contract.analysis!);
+  if (engine.interrupted) {
+    console.error("[生成] 已中断（journal 已记录，缓存中的成功模块已保留）");
+    process.exit(130);
   }
-  writeFileSync(path.join(knowledgeDir, "module-analysis.json"), result.output, "utf-8");
-  console.log(`[生成] 契约校验通过：${analyses.length} 个模块分析已写出 module-analysis.json`);
+  if (!engine.analyses.length) fatal(`没有任何模块分析成功（失败: ${engine.failed.map((f) => f.module_id).join(", ")}）`);
+  for (const f of engine.failed) console.error(`[生成] 模块失败（已隔离）: ${f.module_id} - ${f.error.slice(0, 120)}`);
 
-  // 4. 渲染 Markdown 到 generated/（不覆盖手写产物）
+  // 2. 合并产物 + 渲染（generated/，不覆盖手写产物）
+  const analyses = engine.analyses as ModuleAnalysis[];
+  writeFileSync(
+    path.join(knowledgeDir, "module-analysis.json"),
+    JSON.stringify({
+      schema_version: "1.0", repository: manifest.repository, commit: manifest.commit,
+      generated_by: `engine (${args.values.agent})`, analyses,
+    }, null, 2),
+    "utf-8",
+  );
+  console.log(`[生成] module-analysis.json 已写出（成功 ${analyses.length}/${modules.length} 模块）`);
+
   const rendered = renderAll(analyses, { repository: manifest.repository, commit: manifest.commit });
   const genDir = path.join(knowledgeDir, "generated", "modules");
   mkdirSync(genDir, { recursive: true });
@@ -253,7 +258,7 @@ async function cmdGenerate() {
   }
   console.log(`[生成] 已渲染 ${Object.keys(rendered).length} 份文档到 generated/modules/`);
 
-  // 5. 确定性校验（写 deterministic-report.json）+ Publisher 汇总（验证基准 = 实际使用的模块映射）
+  // 3. 确定性校验（写 deterministic-report.json）+ Publisher 汇总
   const assertionsPath = path.resolve(args.values.assertions);
   const assertions = existsSync(assertionsPath) ? JSON.parse(readFileSync(assertionsPath, "utf-8")) : [];
   const moduleMapFile = path.relative(knowledgeDir, moduleMapPath).replace(/\\/g, "/");
@@ -264,8 +269,42 @@ async function cmdGenerate() {
     "utf-8",
   );
   const pub = publish(knowledgeDir);
-  console.log(`[生成] Publisher 汇总: overall=${pub.overall_passed ? "通过" : "失败"}（deterministic=${verify.passed ? "通过" : "失败"}${pub.sections["review-report"]?.present ? ", review 存在" : ", review 缺席"}${pub.sections["e2e-report"]?.present ? ", e2e 存在" : ", e2e 缺席"}）`);
-  if (!verify.passed) process.exit(1);
+  console.log(`[生成] Publisher 汇总: overall=${pub.overall_passed ? "通过" : "失败"}（deterministic=${verify.passed ? "通过" : "失败"}）`);
+  if (!verify.passed || engine.failed.length) process.exit(1);
+}
+
+/** P0-3：离线契约调试（不调 LLM：验证已有 LLM 输出能否过规范化+契约） */
+function cmdValidateAnalysis() {
+  const args = parseArgs({
+    options: {
+      file: { type: "string", required: true },
+      knowledge: { type: "string", default: "./knowledge/p-queue/scheduling" },
+    },
+    strict: true,
+    args: rest,
+  });
+
+  const knowledgeDir = path.resolve(args.values.knowledge);
+  const manifest = loadJson<Manifest>(path.join(knowledgeDir, "repository-manifest.json"));
+  const whitelist = new Set(manifest.files.map((f) => f.path));
+
+  const raw = JSON.parse(readFileSync(path.resolve(args.values.file ?? fatal("缺少 --file")), "utf-8"));
+  const list: Array<[any, any]> = Array.isArray(raw.analyses)
+    ? raw.analyses.map((a: any) => [a, { id: a.module_id, name: a.name, summary: a.summary, source_files: a.read_files ?? [] }])
+    : [[raw, { id: raw.module_id, name: raw.name, summary: raw.summary, source_files: raw.read_files ?? [] }]];
+
+  let allOk = true;
+  for (const [item, mod] of list) {
+    const normalized = normalizeAnalysis(item, mod, whitelist, item.read_files ?? mod.source_files);
+    const c = validateModuleAnalysis(JSON.stringify(normalized), whitelist);
+    if (c.ok) console.log(`[离线验证] ${mod.id}: 契约通过`);
+    else {
+      allOk = false;
+      console.error(`[离线验证] ${mod.id}: 契约失败`);
+      for (const e of c.errors) console.error(`  - ${e}`);
+    }
+  }
+  process.exit(allOk ? 0 : 1);
 }
 
 switch (cmd) {
@@ -274,6 +313,7 @@ switch (cmd) {
   case "trace": cmdTrace(); break;
   case "discover": await cmdDiscover(); break;
   case "generate": await cmdGenerate(); break;
+  case "validate-analysis": cmdValidateAnalysis(); break;
   default:
-    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover / generate`);
+    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover / generate / validate-analysis`);
 }

@@ -25,19 +25,21 @@ export interface AgentRunResult {
   readLog: string[];
 }
 
-const PROTOCOL_TIMEOUT_MS = 120_000;
+const PROTOCOL_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 活动感知：收到 Agent 消息即重置；LLM 思考期间允许长静默
 
-/** 运行 Discovery Agent 子进程，代理全部源码读取（白名单制） */
+/** 运行 Discovery Agent 子进程，代理全部源码读取（白名单制）；onSpawn 暴露 pid 供外部中断清理 */
 export function runAgent(
   agentScript: string,
   contextPath: string,
   repoDir: string,
   whitelist: Set<string>,
+  onSpawn?: (pid: number | undefined) => void,
 ): Promise<AgentRunResult> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.resolve(agentScript), path.resolve(contextPath)], {
       stdio: ["pipe", "pipe", "inherit"],
     });
+    if (onSpawn) onSpawn(child.pid ?? undefined);
 
     const readLog: string[] = [];
     let stdoutBuf = "";
@@ -52,9 +54,17 @@ export function runAgent(
       resolve({ ...result, readLog });
     };
 
-    const timer = setTimeout(() => {
-      finish({ ok: false, output: null, error: `Agent 超时（${PROTOCOL_TIMEOUT_MS / 1000}s）` });
-    }, PROTOCOL_TIMEOUT_MS);
+    // 活动感知超时：任何 stdout 消息（协议请求/日志/done）都重置计时器
+    let timer = setTimeout(() => {
+      finish({ ok: false, output: null, error: `Agent 空闲超时（${PROTOCOL_IDLE_TIMEOUT_MS / 60000}min 无消息）` });
+    }, PROTOCOL_IDLE_TIMEOUT_MS);
+    const resetTimer = () => {
+      if (settled) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        finish({ ok: false, output: null, error: `Agent 空闲超时（${PROTOCOL_IDLE_TIMEOUT_MS / 60000}min 无消息）` });
+      }, PROTOCOL_IDLE_TIMEOUT_MS);
+    };
 
     function handleLine(line: string) {
       let msg: any;
@@ -80,6 +90,7 @@ export function runAgent(
       } else if (msg.op === "done") {
         output = typeof msg.output === "string" ? msg.output : JSON.stringify(msg.output ?? null);
       }
+      resetTimer(); // 活动感知：收到消息重置空闲计时
     }
 
     child.stdout.setEncoding("utf-8");

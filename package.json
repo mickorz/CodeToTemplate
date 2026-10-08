@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "analyze": "node src/cli.ts analyze",
     "verify": "node src/knowledge/validator.ts ./knowledge/openworkbuddy/desktop ./cache/repos/mickorz__openworkbuddy test/gold-set/openworkbuddy-assertions.json",
-    "test": "node test/failure-injection.mjs && node test/discovery-contract.mjs && node test/generate-contract.mjs",
+    "test": "node test/failure-injection.mjs && node test/discovery-contract.mjs && node test/generate-contract.mjs && node test/generate-engine.mjs",
     "discover": "node src/cli.ts discover",
     "generate": "node src/cli.ts generate"
   },
