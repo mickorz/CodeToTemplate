@@ -11,5 +11,10 @@ thirdparties/
 
 # macOS
 .DS_Store
+
+# Claude Code 本地配置（不进 git）
+.claude/settings.local.json
+
+# 项目数据
 /cache/
 /knowledge/

@@ -19,22 +19,25 @@ export interface SearchHit {
   modules: CapabilityEntry["modules"];
 }
 
-export function searchCapabilities(catalog: Catalog, query: string): SearchHit[] {
+export function searchCapabilities(catalog: Catalog, query: string, opts: { trustedOnly?: boolean } = {}): SearchHit[] {
   const q = query.toLowerCase();
   const hits: SearchHit[] = [];
 
   for (const cap of catalog.capabilities) {
-    // 查询词与能力关键词的双向命中：query 含关键词 或 关键词出现在 query
+    // P2-0b：默认只收录可信条目（reviewed 且有证据），未审查内容仅在非 trusted 模式出现
+    let modules = cap.modules.filter((m) => (opts.trustedOnly ? m.review_status === "reviewed" && m.evidence_status === "evidenced" : true));
+    if (!modules.length) continue;
+
     const matched = cap.keywords.filter((k) => {
       const kw = k.toLowerCase();
       return q.includes(kw) || new RegExp(kw, "i").test(query);
     });
-    // 能力 ID 本身作为词（如查询含 concurrency）
     const idParts = cap.id.split("-").filter((p) => p.length > 3 && q.includes(p));
     if (!matched.length && !idParts.length) continue;
 
-    // 模块排序：证据量优先
-    const modules = [...cap.modules].sort((a, b) => b.evidence.length - a.evidence.length);
+    // 模块排序：审查通过优先，其次证据量
+    modules = [...modules].sort((a, b) =>
+      (a.review_status === "reviewed" ? 0 : 1) - (b.review_status === "reviewed" ? 0 : 1) || b.evidence.length - a.evidence.length);
     hits.push({
       capability: cap.id,
       score: matched.length + idParts.length * 0.5,
@@ -52,7 +55,8 @@ export function formatHits(hits: SearchHit[], limit = 5): string {
   for (const h of hits.slice(0, limit)) {
     lines.push(`## ${h.capability}（匹配: ${h.matched_query_terms.join("、")}）`);
     for (const m of h.modules.slice(0, 3)) {
-      lines.push(`- ${m.repo}/${m.module_id} @ ${m.commit.slice(0, 10)}`);
+      const badge = m.review_status === "reviewed" ? "[已审查]" : "[未审查]";
+      lines.push(`- ${badge} ${m.repo}/${m.module_id} @ ${m.commit.slice(0, 10)}${m.evidence_status === "inferred-only" ? " [仅推断无实证]" : ""}`);
       lines.push(`  文档: ${m.doc}`);
       for (const e of m.evidence.slice(0, 2)) {
         lines.push(`  证据: ${e.statement}（${e.file}${e.line ? `:${e.line}` : ""}）`);

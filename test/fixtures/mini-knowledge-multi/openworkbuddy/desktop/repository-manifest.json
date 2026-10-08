@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0", "repository": "openworkbuddy", "commit": "cccc1111222233334444555566667777888899cc",
+  "license": { "spdx": "PolyForm-Noncommercial-1.0.0", "package_json_field": "PolyForm-Noncommercial-1.0.0", "license_file": "LICENSE" },
+  "files": [], "file_count": 0, "total_bytes": 0,
+  "remote": "", "ref": "main", "filters": { "max_file_bytes": 0, "max_text_source_bytes": 0, "ignored_dirs": [], "excluded_binary": 0, "excluded_oversized": 0 }
+}

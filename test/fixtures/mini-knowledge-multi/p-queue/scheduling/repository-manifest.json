@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0", "repository": "p-queue", "commit": "bbbb1111222233334444555566667777888899bb",
+  "license": { "spdx": "MIT", "package_json_field": "MIT", "license_file": "license" },
+  "files": [], "file_count": 0, "total_bytes": 0,
+  "remote": "", "ref": "main", "filters": { "max_file_bytes": 0, "max_text_source_bytes": 0, "ignored_dirs": [], "excluded_binary": 0, "excluded_oversized": 0 }
+}

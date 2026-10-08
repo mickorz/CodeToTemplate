@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0", "passed": true,
+  "llm": [
+    { "module_id": "scheduling.index", "review_status": "reviewed", "verdicts": [{ "statement": "x", "verdict": "supported", "reason": "y" }] }
+  ]
+}

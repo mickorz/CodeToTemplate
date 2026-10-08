@@ -54,5 +54,25 @@ assert(catalog.capabilities.some((c) => c.id === "crash-recovery" && c.modules.s
   assert(ev && ev.file && typeof ev.line === "number", "能力条目携带源码证据（file:line）");
 }
 
+// P2-0b：审查状态标注与 trusted 过滤
+{
+  const conc = catalog.capabilities.find((c) => c.id === "concurrency-limit");
+  const pq = conc?.modules.find((m) => m.repo === "p-queue");
+  assert(pq?.review_status === "reviewed" && pq?.evidence_status === "evidenced", "已审查模块正确标注（reviewed/evidenced）");
+  const crash = catalog.capabilities.find((c) => c.id === "crash-recovery");
+  const owb = crash?.modules.find((m) => m.repo === "openworkbuddy");
+  assert(owb?.review_status === "unreviewed", "无 review-report 的模块标 unreviewed");
+}
+{
+  const trusted = searchCapabilities(catalog, "崩溃 重启 崩溃恢复", { trustedOnly: true });
+  const hasUnreviewed = trusted.some((h) => h.modules.some((m) => m.review_status !== "reviewed"));
+  assert(!hasUnreviewed, "trustedOnly 过滤后无未审查条目");
+}
+{
+  const all = searchCapabilities(catalog, "崩溃 重启");
+  const firstModule = all.flatMap((h) => h.modules)[0];
+  assert(firstModule.review_status === "reviewed" || all.every((h) => h.modules.every((m) => m.review_status !== "reviewed")), "默认排序已审查模块优先");
+}
+
 console.log(`\n[结果] 能力索引与检索测试: ${pass} 通过 / ${fail} 失败`);
 if (fail > 0) process.exit(1);

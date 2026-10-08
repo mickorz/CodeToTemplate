@@ -35,6 +35,7 @@ import { checkClaims } from "./review/claim-checker.ts";
 import { computeCacheKey, readCache, writeCache } from "./generate/cache.ts";
 import { createHash } from "node:crypto";
 import { buildCatalog, writeCatalog, type Catalog } from "./catalog/builder.ts";
+import { buildReferenceContext, writeReferenceContext } from "./reference/builder.ts";
 import { searchCapabilities, formatHits } from "./catalog/search.ts";
 
 const CACHE_ROOT = path.resolve("cache");
@@ -273,8 +274,8 @@ async function cmdGenerate() {
     JSON.stringify({ repository: manifest.repository, commit: manifest.commit, deterministic_checks: verify.checks, passed: verify.passed }, null, 2),
     "utf-8",
   );
-  const pub = publish(knowledgeDir);
-  console.log(`[生成] Publisher 汇总: overall=${pub.overall_passed ? "通过" : "失败"}（deterministic=${verify.passed ? "通过" : "失败"}）`);
+  const pub = publish(knowledgeDir, { required: ["deterministic-report"], mode: "partial" });
+  console.log(`[生成] Publisher 中间汇总（partial，正式发布需 review 通过）: overall=${pub.overall_passed ? "通过" : "失败"}（deterministic=${verify.passed ? "通过" : "失败"}${pub.sections["review-report"]?.present ? ", review 已存在" : ", review 未跑"}）`);
   if (!verify.passed || engine.failed.length) process.exit(1);
 }
 
@@ -479,6 +480,7 @@ function cmdSearch() {
       query: { type: "string", required: true },
       knowledge: { type: "string", default: "./knowledge" },
       limit: { type: "string", default: "5" },
+      "trusted-only": { type: "boolean", default: false }, // P2-0b：只返回已审查且有实证的能力引用
     },
     strict: true,
     args: rest,
@@ -486,10 +488,46 @@ function cmdSearch() {
   const catalogPath = path.join(path.resolve(args.values.knowledge), "catalog.json");
   if (!existsSync(catalogPath)) fatal(`能力索引不存在: ${catalogPath}，请先执行 npm run catalog`);
   const catalog = loadJson<Catalog>(catalogPath);
-  const hits = searchCapabilities(catalog, args.values.query ?? "");
-  console.log(`[检索] 查询: ${args.values.query}`);
+  const hits = searchCapabilities(catalog, args.values.query ?? "", { trustedOnly: args.values["trusted-only"] === true });
+  console.log(`[检索] 查询: ${args.values.query}${args.values["trusted-only"] ? "（仅可信条目）" : ""}`);
   console.log(formatHits(hits, Number(args.values.limit)));
   if (!hits.length) process.exit(1);
+}
+
+/** P2-1：参考实现上下文构建（需求 -> 可信模块 -> 最小参考包，供 Coding Agent 消费） */
+async function cmdContext() {
+  const args = parseArgs({
+    options: {
+      query: { type: "string", required: true },
+      knowledge: { type: "string", default: "./knowledge" },
+      out: { type: "string", default: "./knowledge/reference" },
+      "no-trusted": { type: "boolean", default: false }, // 默认仅可信模块
+      limit: { type: "string", default: "3" },
+    },
+    strict: true,
+    args: rest,
+  });
+  const root = path.resolve(args.values.knowledge);
+  const catalogPath = path.join(root, "catalog.json");
+  if (!existsSync(catalogPath)) fatal(`能力索引不存在: ${catalogPath}，请先执行 npm run catalog`);
+  const catalog = loadJson<Catalog>(catalogPath);
+
+  const query = args.values.query ?? "";
+  const ctx = buildReferenceContext(query, catalog, root, {
+    trustedOnly: args.values["no-trusted"] !== true,
+    maxModules: Number(args.values.limit),
+  });
+  if (!ctx.references.length) {
+    console.error(`[参考] 无可信模块命中需求：${query}（可先 review 提升可信度，或用 --no-trusted 放开）`);
+    process.exit(1);
+  }
+  const { json, md } = writeReferenceContext(path.resolve(args.values.out), ctx);
+  console.log(`[参考] 需求：${query}`);
+  console.log(`[参考] 命中能力：${ctx.capabilities_hit.map((c) => c.capability).join("、")}`);
+  for (const r of ctx.references) {
+    console.log(`  - ${r.repo}/${r.module_id} [${r.review_status}] ${r.facts.length} facts，许可证 ${r.license}`);
+  }
+  console.log(`[参考] 参考包已写出：${json} 与 ${md}`);
 }
 
 switch (cmd) {
@@ -501,7 +539,8 @@ switch (cmd) {
   case "review": await cmdReview(); break;
   case "catalog": cmdCatalog(); break;
   case "search": cmdSearch(); break;
+  case "context": await cmdContext(); break;
   case "validate-analysis": cmdValidateAnalysis(); break;
   default:
-    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover / generate / review / catalog / search / validate-analysis`);
+    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover / generate / review / catalog / search / context / validate-analysis`);
 }

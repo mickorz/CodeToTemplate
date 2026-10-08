@@ -46,6 +46,9 @@ export interface CapabilityEntry {
     doc: string;
     matched_keywords: string[];
     evidence: Array<{ statement: string; file: string; line?: number }>;
+    /** P2-0b：审查与证据状态（可信发布门禁） */
+    review_status: "reviewed" | "unreviewed";
+    evidence_status: "evidenced" | "inferred-only";
   }>;
 }
 
@@ -84,17 +87,26 @@ export function extractCapabilities(a: ModuleAnalysis, meta: { repo: string; top
   return out;
 }
 
-/** 扫描 knowledge 目录构建能力索引 */
+/** 扫描 knowledge 目录构建能力索引（P2-0b：读取 review-report 标注审查状态） */
 export function buildCatalog(knowledgeRoot: string): Catalog {
   const byCap = new Map<string, CapabilityEntry>();
 
   for (const repo of readdirSync(knowledgeRoot)) {
     const repoDir = path.join(knowledgeRoot, repo);
-    if (!existsSync(path.join(repoDir, ".git")) && !readdirSync(repoDir).every(() => true)) { /* 继续 */ }
     for (const topic of readdirSync(repoDir)) {
-      const maPath = path.join(repoDir, topic, "module-analysis.json");
+      const topicDir = path.join(repoDir, topic);
+      const maPath = path.join(topicDir, "module-analysis.json");
       if (!existsSync(maPath)) continue;
       const ma = JSON.parse(readFileSync(maPath, "utf-8"));
+      // 审查状态：review-report 的 per-module 状态（无报告则全部 unreviewed）
+      const reviewPath = path.join(topicDir, "review-report.json");
+      let reviewByModule = new Map<string, string>();
+      if (existsSync(reviewPath)) {
+        try {
+          const rr = JSON.parse(readFileSync(reviewPath, "utf-8"));
+          reviewByModule = new Map((rr.llm ?? []).map((r: any) => [r.module_id, r.review_status ?? (r.verdicts?.length ? "reviewed" : "unreviewed")]));
+        } catch { /* 损坏的 review 报告按 unreviewed 处理 */ }
+      }
       for (const a of ma.analyses ?? []) {
         const caps = extractCapabilities(a, { repo, topic, doc: `${repo}/${topic}` });
         for (const c of caps) {
@@ -109,6 +121,8 @@ export function buildCatalog(knowledgeRoot: string): Catalog {
             doc: `knowledge/${repo}/${topic}/generated/modules/${a.module_id.replace(/^[\w]+\./, "").replace(/[^\w-]/g, "-")}.md`,
             matched_keywords: c.matched,
             evidence: c.evidence,
+            review_status: (reviewByModule.get(a.module_id) as "reviewed" | "unreviewed") ?? "unreviewed",
+            evidence_status: c.evidence.length ? "evidenced" : "inferred-only",
           });
         }
       }
