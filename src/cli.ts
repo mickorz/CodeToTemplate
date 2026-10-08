@@ -22,6 +22,9 @@ import path from "node:path";
 import { resolveRepository } from "./collector/git.ts";
 import { buildManifest, type Manifest } from "./collector/manifest.ts";
 import { buildSourceMap, bfsPath, type SourceMap } from "./analyzer/dependencies.ts";
+import { buildDiscoveryContext } from "./discovery/context.ts";
+import { validateModuleMap } from "./discovery/contract.ts";
+import { runAgent } from "./discovery/runner.ts";
 
 const CACHE_ROOT = path.resolve("cache");
 const [cmd, ...rest] = process.argv.slice(2);
@@ -125,10 +128,66 @@ function cmdTrace() {
   process.exit(allOk ? 0 : 1);
 }
 
+/** P1-1：受限发现上下文 + Agent Runner + 输出契约校验 */
+async function cmdDiscover() {
+  const args = parseArgs({
+    options: {
+      knowledge: { type: "string", default: "./knowledge/openworkbuddy/desktop" },
+      agent: { type: "string", default: "./agents/mock-discover.mjs" },
+      topic: { type: "string", default: "desktop" },
+    },
+    strict: true,
+    args: rest,
+  });
+
+  const knowledgeDir = path.resolve(args.values.knowledge);
+  const manifest = loadJson<Manifest>(path.join(knowledgeDir, "repository-manifest.json"));
+  const sourceMap = loadJson<SourceMap>(path.join(knowledgeDir, "source-map.json"));
+  const repoDir = path.join(CACHE_ROOT, "repos", manifest.repository.replace("/", "__"));
+  if (!existsSync(repoDir)) fatal(`本地缓存仓库不存在: ${repoDir}，请先执行 collect`);
+
+  // package.json 内容仅进上下文（入口候选），不含 gold-set / knowledge 其他文件
+  let pkgJson: Record<string, unknown> | null = null;
+  if (existsSync(path.join(repoDir, "package.json"))) {
+    try { pkgJson = JSON.parse(readFileSync(path.join(repoDir, "package.json"), "utf-8")); } catch { /* 非法 json 置空 */ }
+  }
+
+  // 1. 生成受限发现上下文（Agent 唯一输入）
+  const context = buildDiscoveryContext(manifest, sourceMap, args.values.topic, pkgJson);
+  const contextPath = path.join(knowledgeDir, "discovery-context.json");
+  writeFileSync(contextPath, JSON.stringify(context, null, 2), "utf-8");
+  console.log(`[发现] 上下文已生成: ${contextPath}（白名单 ${context.readable_files.length} 文件）`);
+
+  // 2. 运行 Agent 子进程（受控读取协议，白名单制）
+  console.log(`[发现] 运行 Agent: ${args.values.agent}`);
+  const result = await runAgent(args.values.agent, contextPath, repoDir, new Set(context.readable_files));
+  if (!result.ok || !result.output) fatal(`Agent 失败: ${result.error}`);
+  console.log(`[发现] Agent 完成，经协议读取 ${result.readLog.length} 个文件: ${result.readLog.slice(0, 5).join(", ")}${result.readLog.length > 5 ? "..." : ""}`);
+
+  // 3. 输出契约校验
+  const manifestPaths = new Set(manifest.files.map((f) => f.path));
+  const contract = validateModuleMap(result.output, context, manifestPaths);
+  if (!contract.ok) {
+    console.error("[发现] 契约校验失败:");
+    for (const e of contract.errors) console.error(`  - ${e}`);
+    process.exit(1);
+  }
+
+  // 4. 落盘：Agent 产物独立命名，不覆盖人工/Publisher 晋升的主 module-map.json
+  const outPath = path.join(knowledgeDir, "module-map.discovery.json");
+  writeFileSync(outPath, result.output, "utf-8");
+  const mm = JSON.parse(result.output);
+  console.log(`[发现] 契约校验通过，module-map 已写出: ${outPath}（${mm.modules.length} 模块）`);
+  for (const m of mm.modules) {
+    console.log(`  - ${m.id} [${m.confidence}] ${m.source_files.length} 文件 | ${String(m.summary).slice(0, 60)}`);
+  }
+}
+
 switch (cmd) {
   case "collect": cmdCollect(); break;
   case "analyze": cmdAnalyze(); break;
   case "trace": cmdTrace(); break;
+  case "discover": await cmdDiscover(); break;
   default:
-    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace`);
+    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover`);
 }

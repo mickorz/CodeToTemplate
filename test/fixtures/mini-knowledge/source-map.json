@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "repository": "example/mini-repo",
+  "commit": "aaaa1111bbbb2222cccc3333dddd4444eeee5555",
+  "stats": { "files_total": 3, "files_analyzed": 3, "imports_file": 1, "imports_external": 0, "imports_unknown": 0 },
+  "files": {
+    "entry.js": {
+      "symbols": [{ "name": "main", "kind": "function", "line": 5 }],
+      "imports": [{ "spec": "./src/supervisor", "resolved": "src/supervisor.js", "kind": "file", "dynamic": false }],
+      "imported_by": []
+    },
+    "src/supervisor.js": {
+      "symbols": [{ "name": "create", "kind": "function", "line": 3 }],
+      "imports": [],
+      "imported_by": ["entry.js"]
+    },
+    "src/util.js": {
+      "symbols": [{ "name": "helper", "kind": "function", "line": 2 }],
+      "imports": [],
+      "imported_by": []
+    }
+  }
+}
