@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0", "repository": "openworkbuddy", "commit": "cccc1111222233334444555566667777888899cc",
+  "analyses": [{
+    "schema_version": "1.0", "module_id": "desktop.process-supervisor", "name": "supervisor",
+    "summary": "独立服务进程的崩溃退避重启与监护",
+    "facts": [
+      { "statement": "服务进程崩溃后退避重启 0.5 2 5 秒", "status": "verified", "evidence": [{ "file": "src/desktop/server-supervisor.js", "lines": [20, 25] }] },
+      { "statement": "utilityProcess 承载独立服务进程", "status": "verified", "evidence": [{ "file": "server-host.js", "lines": [1, 10] }] }
+    ],
+    "execution_flows": [], "interfaces": [],
+    "dependencies": { "internal_files": [], "external_packages": [] },
+    "inferences": [], "reuse_guidance": { "portable": [], "adapt": [], "risks": [] },
+    "open_questions": [], "read_files": ["src/desktop/server-supervisor.js"]
+  }]
+}

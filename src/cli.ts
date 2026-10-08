@@ -34,6 +34,8 @@ import { normalizeAnalysis } from "./generate/normalize.ts";
 import { checkClaims } from "./review/claim-checker.ts";
 import { computeCacheKey, readCache, writeCache } from "./generate/cache.ts";
 import { createHash } from "node:crypto";
+import { buildCatalog, writeCatalog, type Catalog } from "./catalog/builder.ts";
+import { searchCapabilities, formatHits } from "./catalog/search.ts";
 
 const CACHE_ROOT = path.resolve("cache");
 const [cmd, ...rest] = process.argv.slice(2);
@@ -352,7 +354,7 @@ async function cmdReview() {
       ...(a.facts ?? []).filter((f: any) => MECH.test(f.statement)).map((f: any) => f.statement),
       ...(a.execution_flows ?? []).map((fl: any) => `执行流程「${fl.name}」：${fl.steps.map((s: any) => s.action).join(" -> ")}`),
     ].slice(0, 15);
-    if (!claims.length) { llmResults.push({ module_id: a.module_id, verdicts: [], note: "无待审条目" }); continue; }
+    if (!claims.length) { llmResults.push({ module_id: a.module_id, verdicts: [], review_status: "unreviewed", note: "无待审条目（基础契约已过，未经语义审查）" }); continue; }
 
     const cacheId = `review__${a.module_id}`;
     // 审查缓存键必须含送审内容 hash：分析刷新后旧审查结论不得继续命中
@@ -360,7 +362,9 @@ async function cmdReview() {
       + "-" + createHash("sha256").update(JSON.stringify(claims)).digest("hex").slice(0, 12);
     const cached = args.values.refresh ? null : readCache(knowledgeDir, cacheId, key);
     if (cached) {
-      llmResults.push(JSON.parse(cached));
+      const entry = JSON.parse(cached);
+      entry.review_status = "reviewed";
+      llmResults.push(entry);
       console.log(`[审查] ${a.module_id} 审查缓存命中`);
       continue;
     }
@@ -374,11 +378,12 @@ async function cmdReview() {
     writeFileSync(ctxPath, JSON.stringify(ctx), "utf-8");
     const run = await runAgent(args.values.agent, ctxPath, repoDir, whitelist);
     if (!run.ok || !run.output) {
-      console.error(`[审查] ${a.module_id} LLM 审查失败: ${run.error}（该模块标 unverifiable 处理）`);
-      llmResults.push({ module_id: a.module_id, verdicts: [], note: `LLM 审查失败: ${run.error}` });
+      console.error(`[审查] ${a.module_id} LLM 审查失败: ${run.error}（该模块标 unreviewed）`);
+      llmResults.push({ module_id: a.module_id, verdicts: [], review_status: "unreviewed", note: `LLM 审查失败: ${run.error}` });
       continue;
     }
     const result = JSON.parse(run.output);
+    result.review_status = "reviewed";
     llmResults.push(result);
     writeCache(knowledgeDir, cacheId, key, JSON.stringify(result));
     const counts = { s: 0, u: 0, n: 0 };
@@ -450,6 +455,43 @@ async function cmdReview() {
   if (!passed) process.exit(1);
 }
 
+/** P1-5a：构建跨仓库能力索引 */
+function cmdCatalog() {
+  const args = parseArgs({
+    options: { knowledge: { type: "string", default: "./knowledge" } },
+    strict: true,
+    args: rest,
+  });
+  const root = path.resolve(args.values.knowledge);
+  const catalog = buildCatalog(root);
+  const out = writeCatalog(root, catalog);
+  const totalModules = catalog.capabilities.reduce((s, c) => s + c.modules.length, 0);
+  console.log(`[索引] 能力 ${catalog.capabilities.length} 类，模块引用 ${totalModules} 条 -> ${out}`);
+  for (const c of catalog.capabilities) {
+    console.log(`  - ${c.id}: ${[...new Set(c.modules.map((m) => m.repo))].join(" / ")}（${c.modules.length} 模块）`);
+  }
+}
+
+/** P1-5b：能力检索（确定性关键词匹配，无需知道仓库名） */
+function cmdSearch() {
+  const args = parseArgs({
+    options: {
+      query: { type: "string", required: true },
+      knowledge: { type: "string", default: "./knowledge" },
+      limit: { type: "string", default: "5" },
+    },
+    strict: true,
+    args: rest,
+  });
+  const catalogPath = path.join(path.resolve(args.values.knowledge), "catalog.json");
+  if (!existsSync(catalogPath)) fatal(`能力索引不存在: ${catalogPath}，请先执行 npm run catalog`);
+  const catalog = loadJson<Catalog>(catalogPath);
+  const hits = searchCapabilities(catalog, args.values.query ?? "");
+  console.log(`[检索] 查询: ${args.values.query}`);
+  console.log(formatHits(hits, Number(args.values.limit)));
+  if (!hits.length) process.exit(1);
+}
+
 switch (cmd) {
   case "collect": cmdCollect(); break;
   case "analyze": cmdAnalyze(); break;
@@ -457,7 +499,9 @@ switch (cmd) {
   case "discover": await cmdDiscover(); break;
   case "generate": await cmdGenerate(); break;
   case "review": await cmdReview(); break;
+  case "catalog": cmdCatalog(); break;
+  case "search": cmdSearch(); break;
   case "validate-analysis": cmdValidateAnalysis(); break;
   default:
-    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover / generate / review / validate-analysis`);
+    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover / generate / review / catalog / search / validate-analysis`);
 }

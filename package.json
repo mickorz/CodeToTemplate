@@ -9,10 +9,12 @@
     "typecheck": "tsc --noEmit",
     "analyze": "node src/cli.ts analyze",
     "verify": "node src/knowledge/validator.ts ./knowledge/openworkbuddy/desktop ./cache/repos/mickorz__openworkbuddy test/gold-set/openworkbuddy-assertions.json",
-    "test": "node test/failure-injection.mjs && node test/discovery-contract.mjs && node test/generate-contract.mjs && node test/generate-engine.mjs && node test/reviewer-adversarial.mjs",
+    "test": "node test/failure-injection.mjs && node test/discovery-contract.mjs && node test/generate-contract.mjs && node test/generate-engine.mjs && node test/reviewer-adversarial.mjs && node test/catalog-search.mjs",
     "discover": "node src/cli.ts discover",
     "generate": "node src/cli.ts generate",
-    "review": "node src/cli.ts review"
+    "review": "node src/cli.ts review",
+    "catalog": "node src/cli.ts catalog",
+    "search": "node src/cli.ts search"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

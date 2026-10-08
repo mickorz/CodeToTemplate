@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0", "repository": "p-queue", "commit": "bbbb1111222233334444555566667777888899bb",
+  "analyses": [{
+    "schema_version": "1.0", "module_id": "scheduling.index", "name": "index",
+    "summary": "并发限制与优先级任务调度队列",
+    "facts": [
+      { "statement": "通过 concurrency 选项控制并发上限", "status": "verified", "evidence": [{ "file": "source/index.ts", "lines": [100, 105] }] },
+      { "statement": "优先级任务经 PriorityQueue 排序后执行", "status": "verified", "evidence": [{ "file": "source/priority-queue.ts", "lines": [10, 20] }] },
+      { "statement": "支持 pause 暂停与 resume 恢复", "status": "verified", "evidence": [{ "file": "source/index.ts", "lines": [200, 210] }] }
+    ],
+    "execution_flows": [], "interfaces": [],
+    "dependencies": { "internal_files": [], "external_packages": [] },
+    "inferences": [], "reuse_guidance": { "portable": [], "adapt": [], "risks": [] },
+    "open_questions": [], "read_files": ["source/index.ts"]
+  }]
+}
