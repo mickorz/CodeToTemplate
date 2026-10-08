@@ -2,6 +2,12 @@
 
 本仓库（CodeToTemplate）的开发过程文档管理规范。
 
+## Git 操作约定
+
+本机已安装 GitHub CLI（`gh`）并完成认证。所有涉及克隆仓库的操作一律使用 `gh repo clone <owner/name> [<目录>]`，不要直接用 `git clone <url>`（gh 自动处理认证与协议，避免私有仓库认证失败）。
+
+Git 的其余操作（fetch、checkout、rev-parse、diff 等）仍直接用 `git` 命令。
+
 ## 开发文档目录：`dev-docs/`
 
 `dev-docs/` 是本仓库专门保存开发过程文档的目录（已在 `.gitignore` 中忽略，不进入 git 仓库）。
