@@ -6,10 +6,10 @@ dist/
 thirdparties/
 
 # 开发过程目录（不进 git）
-dev-docs/
-dev-examples/
+/dev-docs/
+/dev-examples/
 
 # macOS
 .DS_Store
-cache/
-knowledge/
+/cache/
+/knowledge/
