@@ -21,7 +21,8 @@
           "verdict": "supported",
           "reason": "源码支持"
         }
-      ]
+      ],
+      "claims_hash": "b11ce0c65caa"
     }
   ],
   "commit": "bbbb1111222233334444555566667777888899bb"

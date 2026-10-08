@@ -98,10 +98,11 @@ export function buildReferenceContext(
       try {
         const rr = JSON.parse(readFileSync(reviewPath, "utf-8"));
         const entry = (rr.llm ?? []).find((r: any) => r.module_id === module_id);
-        // 时效校验：commit 一致 + 送审内容 hash 一致，旧报告不误用
-        const commitOk = !rr.commit || rr.commit === ma.commit;
-        const hashOk = !entry?.claims_hash || entry.claims_hash === claimsHash(buildClaimsForReview(a));
-        if (entry && commitOk && hashOk && (entry.review_status === "reviewed" || entry.verdicts?.length)) {
+        // 严格时效校验（fail-close，与 catalog 一致）：报告 passed + commit 完全一致 + claims_hash 存在且匹配
+        const reportPassed = rr.passed === true;
+        const commitOk = typeof rr.commit === "string" && rr.commit === ma.commit;
+        const hashOk = typeof entry?.claims_hash === "string" && entry.claims_hash === claimsHash(buildClaimsForReview(a));
+        if (entry && reportPassed && commitOk && hashOk && entry.review_status === "reviewed") {
           reviewStatus = "reviewed";
           verdictMap = verdictMapFromReview(entry);
         }

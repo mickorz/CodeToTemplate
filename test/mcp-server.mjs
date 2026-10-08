@@ -17,6 +17,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "../src/mcp/server.ts";
 import { buildCatalog } from "../src/catalog/builder.ts";
+import { claimsHash, buildClaimsForReview } from "../src/review/claims.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -47,7 +48,7 @@ writeFileSync(path.join(topicDir, "repository-manifest.json"), JSON.stringify({
   files: [{ path: "source/index.ts", bytes: 80, blob_sha: "x" }],
   license: { spdx: "MIT" },
 }));
-writeFileSync(path.join(topicDir, "module-analysis.json"), JSON.stringify({
+const analysisObj = {
   schema_version: "1.0", repository: "testrepo", commit: SHA,
   analyses: [{
     schema_version: "1.0", module_id: "scheduling.core", name: "core",
@@ -58,10 +59,12 @@ writeFileSync(path.join(topicDir, "module-analysis.json"), JSON.stringify({
     inferences: [], reuse_guidance: { portable: [], adapt: [], risks: [] },
     open_questions: [], read_files: ["source/index.ts"],
   }],
-}));
+};
+writeFileSync(path.join(topicDir, "module-analysis.json"), JSON.stringify(analysisObj));
 writeFileSync(path.join(topicDir, "review-report.json"), JSON.stringify({
   passed: true, commit: SHA,
   llm: [{ module_id: "scheduling.core", review_status: "reviewed",
+    claims_hash: claimsHash(buildClaimsForReview(analysisObj.analyses[0])),
     verdicts: [{ statement: "通过 concurrency 控制并发上限", verdict: "supported", reason: "源码第 2 行" }] }],
 }));
 // 生成 catalog（复用 builder，写盘供 server 读取）
@@ -90,12 +93,15 @@ await Promise.all([server.connect(serverTransport), client.connect(clientTranspo
   assert(text.includes("[supported]"), "facts 带 claim_status（claim 级可信）", text.slice(0, 200));
 }
 
-// 3. get_module_analysis
+// 3. get_module_analysis（含逐条 verdict 与路径穿越拒绝）
 {
   const r = await client.callTool({ name: "get_module_analysis", arguments: { repo: "testrepo", module_id: "scheduling.core" } });
   const data = JSON.parse(r.content[0].text);
   assert(data.review_status === "reviewed", "get_module_analysis 返回审查状态");
+  assert(data.facts[0].reviewer_verdict === "supported", "facts 逐条附 reviewer_verdict（修复 3）");
   assert(data.interfaces.length === 1 && data.interfaces[0].symbol === "Scheduler", "返回接口结构");
+  const traversal = await client.callTool({ name: "get_module_analysis", arguments: { repo: "../../etc", module_id: "x" } }).catch((e) => e);
+  assert(String(traversal.message ?? traversal).length > 0 && !String(traversal.message ?? traversal).includes("[模块不存在"), "目录穿越输入被拒绝或未泄露路径", String(traversal.message ?? traversal).slice(0, 80));
 }
 
 // 4. read_source_reference：固定 commit 成功

@@ -101,26 +101,35 @@ export function extractCapabilities(
 export function buildCatalog(knowledgeRoot: string): Catalog {
   const byCap = new Map<string, CapabilityEntry>();
 
-  for (const repo of readdirSync(knowledgeRoot)) {
+  for (const repo of readdirSync(knowledgeRoot, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && !d.name.startsWith("reference")) // 跳过文件与参考产物目录（catalog.json / reference*/）
+    .map((d) => d.name)) {
     const repoDir = path.join(knowledgeRoot, repo);
-    for (const topic of readdirSync(repoDir)) {
+    for (const topic of readdirSync(repoDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)) {
       const topicDir = path.join(repoDir, topic);
       const maPath = path.join(topicDir, "module-analysis.json");
       if (!existsSync(maPath)) continue;
       const ma = JSON.parse(readFileSync(maPath, "utf-8"));
-      // 审查状态与时效校验（P2 修复 2）：commit 一致 + 送审内容 hash 一致才视为有效审查
+      // 审查状态与时效校验（P2 第三轮评审修复：严格 fail-close）
+      // 必须同时满足：报告整体 passed、commit 完全一致、claims_hash 存在且匹配、模块状态有效。
+      // 缺任一字段的旧格式报告一律降级 unreviewed（兼容读取但不可信）。
       const reviewPath = path.join(topicDir, "review-report.json");
       let reviewByModule = new Map<string, string>();
       let verdictByModule = new Map<string, Map<string, string>>();
       if (existsSync(reviewPath)) {
         try {
           const rr = JSON.parse(readFileSync(reviewPath, "utf-8"));
-          const commitOk = !rr.commit || rr.commit === ma.commit;
+          const reportPassed = rr.passed === true;
+          const commitOk = typeof rr.commit === "string" && rr.commit === ma.commit;
           for (const entry of rr.llm ?? []) {
-            let valid = commitOk && entry.review_status === "reviewed";
-            if (valid && entry.claims_hash) {
-              const curHash = claimsHash(buildClaimsForReview(a0Of(ma, entry.module_id)));
-              if (curHash !== entry.claims_hash) valid = false; // 分析已变，旧审查失效
+            let valid = reportPassed && commitOk && entry?.review_status === "reviewed";
+            if (valid) {
+              if (typeof entry.claims_hash !== "string" || !entry.claims_hash) {
+                valid = false; // 缺指纹：旧格式，不可作为可信依据
+              } else {
+                const curHash = claimsHash(buildClaimsForReview(a0Of(ma, entry.module_id)));
+                if (curHash !== entry.claims_hash) valid = false; // 分析已变，旧审查失效
+              }
             }
             reviewByModule.set(entry.module_id, valid ? "reviewed" : "unreviewed");
             verdictByModule.set(entry.module_id, verdictMapFromReview(entry));
@@ -143,7 +152,11 @@ export function buildCatalog(knowledgeRoot: string): Catalog {
             matched_keywords: c.matched,
             evidence: c.evidence,
             review_status: (reviewByModule.get(a.module_id) as "reviewed" | "unreviewed") ?? "unreviewed",
-            evidence_status: c.evidence.length ? "evidenced" : "inferred-only",
+            // P2 第三轮评审修复 2：必须有至少一条明确 supported verdict 的匹配事实才算 evidenced，
+            // 未送审/unverifiable 的事实不构成可信能力证据（只能出现在非可信检索）
+            evidence_status: c.evidence.some((e) => verdictByModule.get(a.module_id)?.get(e.statement) === "supported")
+              ? "evidenced"
+              : "inferred-only",
           });
         }
       }

@@ -8,11 +8,25 @@
 
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { readFileSync, writeFileSync, cpSync, rmSync } from "node:fs";
 import { buildCatalog, extractCapabilities } from "../src/catalog/builder.ts";
+import { claimsHash, buildClaimsForReview } from "../src/review/claims.ts";
 import { searchCapabilities } from "../src/catalog/search.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = path.join(here, "fixtures", "mini-knowledge-multi");
+
+// setup：为 p-queue fixture 的 review-report 补 claims_hash（时效严格校验要求存在且匹配）
+{
+  const rp = path.join(fixtureRoot, "p-queue", "scheduling", "review-report.json");
+  const rr = JSON.parse(readFileSync(rp, "utf-8"));
+  const ma = JSON.parse(readFileSync(path.join(fixtureRoot, "p-queue", "scheduling", "module-analysis.json"), "utf-8"));
+  for (const entry of rr.llm ?? []) {
+    const a = ma.analyses.find((x) => x.module_id === entry.module_id);
+    if (a && !entry.claims_hash) entry.claims_hash = claimsHash(buildClaimsForReview(a));
+  }
+  writeFileSync(rp, JSON.stringify(rr, null, 2));
+}
 
 let pass = 0, fail = 0;
 function assert(cond, name, detail = "") {
@@ -116,16 +130,40 @@ assert(catalog.capabilities.some((c) => c.id === "crash-recovery" && c.modules.s
 
 // P2 评审修复回归：review-report 的 commit 与分析不一致时模块降级 unreviewed
 {
-  const fs = await import("node:fs");
   const badReview = { passed: true, commit: "f".repeat(40), llm: [{ module_id: "scheduling.index", review_status: "reviewed", verdicts: [] }] };
   const tmpK = path.join(here, "fixtures", "mini-knowledge-multi-badcommit");
-  fs.cpSync(fixtureRoot, tmpK, { recursive: true });
-  fs.writeFileSync(path.join(tmpK, "p-queue", "scheduling", "review-report.json"), JSON.stringify(badReview));
+  cpSync(fixtureRoot, tmpK, { recursive: true });
+  writeFileSync(path.join(tmpK, "p-queue", "scheduling", "review-report.json"), JSON.stringify(badReview));
   const cat2 = buildCatalog(tmpK);
   const conc2 = cat2.capabilities.find((c) => c.id === "concurrency-limit");
   const pq2 = conc2?.modules.find((m) => m.repo === "p-queue");
   assert(pq2?.review_status === "unreviewed", "旧 commit 的审查报告不生效（时效校验）");
-  fs.rmSync(tmpK, { recursive: true, force: true });
+  rmSync(tmpK, { recursive: true, force: true });
+}
+
+// P2 第三轮评审修复 1：缺 claims_hash 的旧格式报告降级 unreviewed（fail-close）
+{
+  const tmpK = path.join(here, "fixtures", "mini-knowledge-multi-nohash");
+  cpSync(fixtureRoot, tmpK, { recursive: true });
+  const rp = path.join(tmpK, "p-queue", "scheduling", "review-report.json");
+  const rr = JSON.parse(readFileSync(rp, "utf-8"));
+  delete rr.llm[0].claims_hash; // 模拟旧格式
+  writeFileSync(rp, JSON.stringify(rr));
+  const cat2 = buildCatalog(tmpK);
+  const pq2 = cat2.capabilities.find((c) => c.id === "concurrency-limit")?.modules.find((m) => m.repo === "p-queue");
+  assert(pq2?.review_status === "unreviewed", "缺 claims_hash 的旧格式报告降级 unreviewed");
+  rmSync(tmpK, { recursive: true, force: true });
+}
+
+// P2 第三轮评审修复 2：未送审事实不构成可信能力证据（evidence_status 加严）
+{
+  const tmpK = path.join(here, "fixtures", "mini-knowledge-multi-noreview");
+  cpSync(fixtureRoot, tmpK, { recursive: true });
+  rmSync(path.join(tmpK, "p-queue", "scheduling", "review-report.json"), { force: true }); // 无审查报告
+  const cat2 = buildCatalog(tmpK);
+  const pq2 = cat2.capabilities.find((c) => c.id === "concurrency-limit")?.modules.find((m) => m.repo === "p-queue");
+  assert(pq2?.evidence_status === "inferred-only", "无 supported verdict 时 evidence_status 降为 inferred-only（未送审事实不作可信证据）", JSON.stringify(pq2?.evidence_status));
+  rmSync(tmpK, { recursive: true, force: true });
 }
 
 console.log(`\n[结果] 能力索引与检索测试: ${pass} 通过 / ${fail} 失败`);

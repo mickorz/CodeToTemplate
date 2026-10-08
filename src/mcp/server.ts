@@ -36,6 +36,8 @@ function loadCatalogAt(knowledgeRoot: string): Catalog {
 
 /** 固定 Commit 源码读取：git show <sha>:<path>，白名单 + 行数上限校验 */
 function readSourceReference(knowledgeRoot: string, reposRoot: string, repo: string, commit: string, file: string, fromLine?: number, toLine?: number): { content: string; total_lines: number; note?: string } {
+  // 目录名白名单（防穿越）：仅允许字母数字点连字符斜杠
+  if (!/^[\w./-]+$/.test(repo) || repo.includes("..")) throw new Error(`非法仓库路径: ${repo}`);
   // 1. 仓库定位：knowledge 下找该 repo 的 topic 目录与 manifest
   const repoDirInKnowledge = path.join(knowledgeRoot, repo);
   if (!existsSync(repoDirInKnowledge)) throw new Error(`未知仓库: ${repo}`);
@@ -121,11 +123,18 @@ export function createMcpServer(options: McpOptions = {}): McpServer {
   });
 
   server.registerTool("get_module_analysis", {
-    description: "查询指定模块的结构化分析：审查状态、已验证事实、接口、依赖与未确认事项。",
-    inputSchema: { repo: z.string(), module_id: z.string(), topic: z.string().optional() },
+    description: "查询指定模块的结构化分析：审查状态、已验证事实（逐条附 Reviewer verdict）、接口、依赖与未确认事项。",
+    inputSchema: {
+      repo: z.string().regex(/^[\w.-]+(\/|[\w.-])*$/).describe("仓库名（仅允许字母数字点连字符斜杠）"),
+      module_id: z.string().regex(/^[\w.-]+$/).describe("模块 id"),
+      topic: z.string().regex(/^[\w.-]+$/).optional().describe("主题目录名"),
+    },
   }, async ({ repo, module_id, topic }) => {
-    const base = path.join(knowledgeRoot, repo);
-    for (const t of topic ? [topic] : readdirSafe(base)) {
+    // P2 第三轮评审修复 3：目录名白名单 + 路径解析后必须仍在知识库根内（防穿越）
+    const safeRepo = path.basename(repo);
+    const base = path.resolve(knowledgeRoot, safeRepo);
+    if (!base.startsWith(path.resolve(knowledgeRoot) + path.sep)) throw new Error(`非法仓库路径: ${repo}`);
+    for (const t of topic ? [path.basename(topic)] : readdirSafe(base)) {
       const maPath = path.join(base, t, "module-analysis.json");
       if (!existsSync(maPath)) continue;
       const ma = JSON.parse(readFileSync(maPath, "utf-8"));
@@ -134,10 +143,17 @@ export function createMcpServer(options: McpOptions = {}): McpServer {
       const rp = path.join(base, t, "review-report.json");
       const rr = existsSync(rp) ? JSON.parse(readFileSync(rp, "utf-8")) : null;
       const entry = rr?.llm?.find((r: any) => r.module_id === module_id);
+      const verdictOf = (s: string) => entry?.verdicts?.find((v: any) => v.statement === s)?.verdict;
+      // 逐条附 verdict：supported / unsupported / unverifiable / 未送审（P2 第三轮评审修复 3）
+      const factsAnnotated = (a.facts ?? []).map((f: any) => ({
+        ...f,
+        reviewer_verdict: verdictOf(f.statement) ?? "not-reviewed",
+      }));
       return { content: [{ type: "text", text: JSON.stringify({
         module_id, repo, commit: ma.commit, topic: t,
         review_status: entry?.review_status ?? "unreviewed",
-        summary: a.summary, facts: a.facts, interfaces: a.interfaces,
+        review_passed: rr?.passed ?? null,
+        summary: a.summary, facts: factsAnnotated, interfaces: a.interfaces,
         dependencies: a.dependencies, open_questions: a.open_questions,
       }, null, 2) }] };
     }
