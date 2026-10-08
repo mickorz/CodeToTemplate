@@ -253,10 +253,11 @@ async function cmdGenerate() {
   }
   console.log(`[生成] 已渲染 ${Object.keys(rendered).length} 份文档到 generated/modules/`);
 
-  // 5. 确定性校验（写 deterministic-report.json）+ Publisher 汇总
+  // 5. 确定性校验（写 deterministic-report.json）+ Publisher 汇总（验证基准 = 实际使用的模块映射）
   const assertionsPath = path.resolve(args.values.assertions);
   const assertions = existsSync(assertionsPath) ? JSON.parse(readFileSync(assertionsPath, "utf-8")) : [];
-  const verify = runVerify(knowledgeDir, repoDir, assertions);
+  const moduleMapFile = path.relative(knowledgeDir, moduleMapPath).replace(/\\/g, "/");
+  const verify = runVerify(knowledgeDir, repoDir, assertions, moduleMapFile);
   writeFileSync(
     path.join(knowledgeDir, "deterministic-report.json"),
     JSON.stringify({ repository: manifest.repository, commit: manifest.commit, deterministic_checks: verify.checks, passed: verify.passed }, null, 2),

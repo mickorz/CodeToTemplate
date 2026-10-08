@@ -60,9 +60,10 @@ export function runVerify(
   knowledgeDir: string,
   repoDir: string,
   assertions: LineAssertion[] = [],
+  moduleMapFile = "module-map.json",
 ): { checks: VerifyCheck[]; passed: boolean } {
   const manifest = JSON.parse(readFileSync(path.join(knowledgeDir, "repository-manifest.json"), "utf-8")) as Manifest;
-  const moduleMap = JSON.parse(readFileSync(path.join(knowledgeDir, "module-map.json"), "utf-8")) as ModuleMap;
+  const moduleMap = JSON.parse(readFileSync(path.join(knowledgeDir, moduleMapFile), "utf-8")) as ModuleMap;
 
   const tracked = new Set(manifest.files.map((f) => f.path));
   const topFiles = new Set(manifest.files.filter((f) => !f.path.includes("/")).map((f) => f.path));
@@ -99,9 +100,10 @@ export function runVerify(
     detail: `${manifest.commit} vs ${moduleMap.commit}`,
   });
 
-  // 检查 4：文档引用路径存在性
+  // 检查 4：文档引用路径存在性（对存在的文档检查；自动链路可能尚无 architecture.md）
   const modulesDir = path.join(knowledgeDir, "modules");
-  const docs = ["architecture.md", ...(existsSync(modulesDir) ? readdirSync(modulesDir).filter((f) => f.endsWith(".md")).map((f) => `modules/${f}`) : [])];
+  const docCandidates = ["architecture.md", ...(existsSync(modulesDir) ? readdirSync(modulesDir).filter((f) => f.endsWith(".md")).map((f) => `modules/${f}`) : []), ...(existsSync(path.join(knowledgeDir, "generated", "modules")) ? readdirSync(path.join(knowledgeDir, "generated", "modules")).filter((f) => f.endsWith(".md")).map((f) => `generated/modules/${f}`) : [])];
+  const docs = docCandidates.filter((d) => existsSync(path.join(knowledgeDir, d)));
   const ghostPaths = new Set<string>();
   for (const doc of docs) {
     const md = readFileSync(path.join(knowledgeDir, doc), "utf-8");
@@ -112,7 +114,7 @@ export function runVerify(
   checks.push({
     check: "文档引用的仓库路径真实存在",
     status: ghostPaths.size ? "fail" : "pass",
-    detail: ghostPaths.size ? `幽灵路径: ${[...ghostPaths].join("; ")}` : `${docs.length} 份文档无幽灵引用`,
+    detail: ghostPaths.size ? `幽灵路径: ${[...ghostPaths].join("; ")}` : docs.length ? `${docs.length} 份文档无幽灵引用` : "无文档可检查（自动链路）",
   });
 
   // 检查 5：行号断言（基准数据注入，语义展开：5min 窗口的等价毫秒表达视为命中）

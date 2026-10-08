@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 
 export interface SymbolEntry {
   name: string;
-  kind: "function" | "class" | "method" | "const" | "enum";
+  kind: "function" | "class" | "method" | "const" | "enum" | "interface" | "type";
   line: number;
 }
 
@@ -56,7 +56,9 @@ export function parseFile(absPath: string): FileParseResult {
     return { symbols: [], imports: [] };
   }
 
-  const sf = ts.createSourceFile(absPath, text, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS);
+  const ext = absPath.split(".").pop()!.toLowerCase();
+  const scriptKind = ext === "ts" || ext === "mts" || ext === "cts" ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+  const sf = ts.createSourceFile(absPath, text, ts.ScriptTarget.ES2022, true, scriptKind);
   const symbols: SymbolEntry[] = [];
   const imports: ImportEntry[] = [];
 
@@ -144,6 +146,13 @@ export function parseFile(absPath: string): FileParseResult {
       symbols.push({ name: node.name.text, kind: "function", line: lineOf(sf, node) });
     } else if (ts.isClassDeclaration(node) && node.name) {
       symbols.push({ name: node.name.text, kind: "class", line: lineOf(sf, node) });
+    } else if (ts.isInterfaceDeclaration(node)) {
+      // TS：interface 与 type 是重要契约符号
+      symbols.push({ name: node.name.text, kind: "interface" as any, line: lineOf(sf, node) });
+    } else if (ts.isTypeAliasDeclaration(node)) {
+      symbols.push({ name: node.name.text, kind: "type" as any, line: lineOf(sf, node) });
+    } else if (ts.isEnumDeclaration(node)) {
+      symbols.push({ name: node.name.text, kind: "enum", line: lineOf(sf, node) });
     } else if (
       ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)
     ) {

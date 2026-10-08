@@ -45,15 +45,21 @@ function resolveRelative(
 ): string | null {
   const base = path.posix.dirname(fromFile);
   const joined = path.posix.normalize(path.posix.join(base, spec));
+  // TS ESM 惯例：import './x.js' 实际指向 x.ts（sindresorhus 风格），需后缀重映射
+  const remapped = joined.replace(/\.(js|mjs|cjs)$/, (m) => ({ ".js": ".ts", ".mjs": ".mts", ".cjs": ".cts" })[m] ?? m);
   const candidates = [
     joined,
+    remapped,
     `${joined}.js`,
     `${joined}.mjs`,
     `${joined}.cjs`,
     `${joined}.ts`,
+    `${joined}.mts`,
+    `${joined}.cts`,
     `${joined}.json`,
     `${joined}/index.js`,
     `${joined}/index.mjs`,
+    `${joined}/index.ts`,
   ];
   for (const c of candidates) {
     if (trackedPaths.has(c)) return c;
@@ -72,7 +78,7 @@ export function buildSourceMap(repoDir: string, manifest: Manifest): SourceMap {
   let analyzed = 0;
 
   for (const f of manifest.files) {
-    if (!/\.(js|mjs|cjs)$/.test(f.path)) continue; // M2 只解析 JS（仓库无 TS 源码）
+    if (!/\.(js|mjs|cjs|ts|mts|cts)$/.test(f.path)) continue; // P1-3：支持 TS（泛化回流修复）
     const parsed = parseFile(path.join(repoDir, f.path));
     analyzed++;
 
