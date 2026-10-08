@@ -169,6 +169,23 @@ export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResu
         const readFiles = rawAnalysis.read_files ?? mod.source_files;
         const normalized = normalizeAnalysis(rawAnalysis, mod, whitelist, readFiles);
         const contract = validateModuleAnalysis(JSON.stringify(normalized), whitelist);
+        // 降级检测：Agent 声明 LLM 输出不可解析的空分析，视为失败不入缓存（避免缓存掩塑失败）
+        const degraded = (normalized.open_questions ?? []).some((q: string) => String(q).includes("LLM 输出不可解析"));
+        if (degraded) {
+          const dbgDir = path.join(knowledgeDir, "analysis-debug");
+          mkdirSync(dbgDir, { recursive: true });
+          writeFileSync(path.join(dbgDir, `${mod.id.replace(/[^\w.-]/g, "_")}.raw.json`), run.output, "utf-8");
+          results.set(mod.id, {
+            entry: {
+              module_id: mod.id, status: "failed", cache_hit: false,
+              llm_calls: 1, duration_ms: Date.now() - started,
+              input_bytes: null, input_tokens: null, output_tokens: null, retry_count: 0,
+              error: "LLM 输出不可解析（降级产物不入缓存，原始输出在 analysis-debug/）",
+            },
+          });
+          console.error(`[引擎] 模块 ${mod.id} LLM 输出不可解析（记 failed 不入缓存，其余模块继续）`);
+          continue;
+        }
         if (!contract.ok) {
           const dbgDir = path.join(knowledgeDir, "analysis-debug");
           mkdirSync(dbgDir, { recursive: true });

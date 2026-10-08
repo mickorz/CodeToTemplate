@@ -17,7 +17,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { resolveRepository } from "./collector/git.ts";
 import { buildManifest, type Manifest } from "./collector/manifest.ts";
@@ -31,6 +31,9 @@ import { publish } from "./generate/publisher.ts";
 import { runVerify } from "./knowledge/validator.ts";
 import { runGenerateEngine } from "./generate/engine.ts";
 import { normalizeAnalysis } from "./generate/normalize.ts";
+import { checkClaims } from "./review/claim-checker.ts";
+import { computeCacheKey, readCache, writeCache } from "./generate/cache.ts";
+import { createHash } from "node:crypto";
 
 const CACHE_ROOT = path.resolve("cache");
 const [cmd, ...rest] = process.argv.slice(2);
@@ -307,13 +310,154 @@ function cmdValidateAnalysis() {
   process.exit(allOk ? 0 : 1);
 }
 
+/** P1-4 Reviewer：确定性主张核查 + LLM 语义审查 + 质量量化（性能与质量指标分开） */
+async function cmdReview() {
+  const args = parseArgs({
+    options: {
+      knowledge: { type: "string", default: "./knowledge/p-queue/scheduling" },
+      agent: { type: "string", default: "./agents/llm-review.mjs" },
+      refresh: { type: "boolean", default: false }, // 忽略审查缓存重审
+    },
+    strict: true,
+    args: rest,
+  });
+
+  const knowledgeDir = path.resolve(args.values.knowledge);
+  const manifest = loadJson<Manifest>(path.join(knowledgeDir, "repository-manifest.json"));
+  const repoDir = path.join(CACHE_ROOT, "repos", manifest.repository.replace("/", "__"));
+  if (!existsSync(repoDir)) fatal(`本地缓存仓库不存在: ${repoDir}`);
+  const ma = loadJson<{ analyses: any[] }>(path.join(knowledgeDir, "module-analysis.json"));
+  const whitelist = new Set(manifest.files.map((f) => f.path));
+
+  // ---- 第一层：确定性主张核查（全部模块全部条目） ----
+  const allViolations = [];
+  for (const a of ma.analyses) {
+    const contents = new Map<string, string>();
+    for (const f of a.read_files ?? []) {
+      if (whitelist.has(f)) {
+        try { contents.set(f, readFileSync(path.join(repoDir, f), "utf-8")); } catch { /* 跳过 */ }
+      }
+    }
+    allViolations.push(...checkClaims(a, contents));
+  }
+  console.log(`[审查] 确定性主张核查：${ma.analyses.length} 模块，拦截 ${allViolations.length} 条违规`);
+  for (const v of allViolations) console.error(`  - [${v.module_id}] ${v.statement.slice(0, 60)} (${v.reason})`);
+
+  // ---- 第二层：LLM 语义审查（抽样：全部 inferences + 机制关键词 facts，上限 15 条/模块，缓存按模块） ----
+  const MECH = /并发|concurren|优先|priority|超时|timeout|暂停|pause|速率|rate|调度|queue|重试/i;
+  const llmResults = [];
+  for (const a of ma.analyses) {
+    const claims = [
+      ...(a.inferences ?? []).map((i: any) => i.statement),
+      ...(a.facts ?? []).filter((f: any) => MECH.test(f.statement)).map((f: any) => f.statement),
+      ...(a.execution_flows ?? []).map((fl: any) => `执行流程「${fl.name}」：${fl.steps.map((s: any) => s.action).join(" -> ")}`),
+    ].slice(0, 15);
+    if (!claims.length) { llmResults.push({ module_id: a.module_id, verdicts: [], note: "无待审条目" }); continue; }
+
+    const cacheId = `review__${a.module_id}`;
+    // 审查缓存键必须含送审内容 hash：分析刷新后旧审查结论不得继续命中
+    const key = computeCacheKey(manifest, { id: cacheId, source_files: a.read_files ?? [] }, `llm-review:${args.values.agent}`)
+      + "-" + createHash("sha256").update(JSON.stringify(claims)).digest("hex").slice(0, 12);
+    const cached = args.values.refresh ? null : readCache(knowledgeDir, cacheId, key);
+    if (cached) {
+      llmResults.push(JSON.parse(cached));
+      console.log(`[审查] ${a.module_id} 审查缓存命中`);
+      continue;
+    }
+
+    const ctx = {
+      repository: manifest.repository, commit: manifest.commit,
+      whitelist: [...whitelist],
+      modules: [{ id: a.module_id, source_files: a.read_files ?? [], claims }],
+    };
+    const ctxPath = path.join(knowledgeDir, "review-context.tmp.json");
+    writeFileSync(ctxPath, JSON.stringify(ctx), "utf-8");
+    const run = await runAgent(args.values.agent, ctxPath, repoDir, whitelist);
+    if (!run.ok || !run.output) {
+      console.error(`[审查] ${a.module_id} LLM 审查失败: ${run.error}（该模块标 unverifiable 处理）`);
+      llmResults.push({ module_id: a.module_id, verdicts: [], note: `LLM 审查失败: ${run.error}` });
+      continue;
+    }
+    const result = JSON.parse(run.output);
+    llmResults.push(result);
+    writeCache(knowledgeDir, cacheId, key, JSON.stringify(result));
+    const counts = { s: 0, u: 0, n: 0 };
+    for (const v of result.verdicts) {
+      if (v.verdict === "supported") counts.s++;
+      else if (v.verdict === "unsupported") counts.u++;
+      else counts.n++;
+    }
+    console.log(`[审查] ${a.module_id} LLM 审查完成：supported ${counts.s} / unsupported ${counts.u} / unverifiable ${counts.n}`);
+  }
+
+  const unsupported = llmResults.flatMap((r: any) =>
+    (r.verdicts ?? []).filter((v: any) => v.verdict === "unsupported").map((v: any) => ({ module_id: r.module_id, ...v })));
+  const passed = allViolations.length === 0 && unsupported.length === 0;
+
+  writeFileSync(
+    path.join(knowledgeDir, "review-report.json"),
+    JSON.stringify({
+      schema_version: "1.0", repository: manifest.repository, commit: manifest.commit,
+      deterministic: { violations: allViolations, count: allViolations.length },
+      llm: llmResults,
+      unsupported_count: unsupported.length,
+      passed,
+    }, null, 2),
+    "utf-8",
+  );
+  console.log(`[审查] review-report.json 已写出：passed=${passed}（确定性违规 ${allViolations.length}，unsupported ${unsupported.length}）`);
+
+  // ---- 质量量化（评审要求：性能与质量指标分开记录） ----
+  const verdicts = llmResults.flatMap((r: any) => r.verdicts ?? []);
+  const judged = verdicts.filter((v: any) => v.verdict !== "unverifiable");
+  const supported = judged.filter((v: any) => v.verdict === "supported");
+  const text = JSON.stringify(ma.analyses);
+  const mechanisms = {
+    concurrency: /并发|concurren/i.test(text),
+    priority: /优先|priority/i.test(text),
+    timeout: /超时|timeout/i.test(text),
+    pause_resume: /暂停|pause|resume/i.test(text),
+    rate_limit: /速率|rate.?limit/i.test(text),
+  };
+  // 空槽率：渲染产物统计
+  let totalSlots = 0, emptySlots = 0;
+  const genDir = path.join(knowledgeDir, "generated", "modules");
+  if (existsSync(genDir)) {
+    for (const f of readdirSync(genDir)) {
+      if (!f.endsWith(".md")) continue;
+      const md = readFileSync(path.join(genDir, f), "utf-8");
+      for (const s of md.split(/^## /m).slice(1)) {
+        totalSlots++;
+        if (/待 LLM|证据不足|待补充|（无/.test(s.slice(s.indexOf("\n")))) emptySlots++;
+      }
+    }
+  }
+  writeFileSync(
+    path.join(knowledgeDir, "quality-report.json"),
+    JSON.stringify({
+      schema_version: "1.0", repository: manifest.repository, commit: manifest.commit,
+      evidence_accuracy: judged.length ? Number((supported.length / judged.length).toFixed(4)) : null,
+      verdicts_total: verdicts.length,
+      unsupported_count: unsupported.length,
+      mechanism_coverage: mechanisms,
+      mechanism_coverage_ratio: Object.values(mechanisms).filter(Boolean).length / Object.keys(mechanisms).length,
+      doc_slots: { total: totalSlots, empty: emptySlots, empty_ratio: totalSlots ? Number((emptySlots / totalSlots).toFixed(4)) : null },
+    }, null, 2),
+    "utf-8",
+  );
+  console.log(`[质量] quality-report.json：准确率 ${judged.length ? ((supported.length / judged.length) * 100).toFixed(1) + "%" : "无抽样"}，机制覆盖 ${Object.values(mechanisms).filter(Boolean).length}/${Object.keys(mechanisms).length}，空槽率 ${totalSlots ? ((emptySlots / totalSlots) * 100).toFixed(0) + "%" : "-"}`);
+
+  if (!passed) process.exit(1);
+}
+
 switch (cmd) {
   case "collect": cmdCollect(); break;
   case "analyze": cmdAnalyze(); break;
   case "trace": cmdTrace(); break;
   case "discover": await cmdDiscover(); break;
   case "generate": await cmdGenerate(); break;
+  case "review": await cmdReview(); break;
   case "validate-analysis": cmdValidateAnalysis(); break;
   default:
-    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover / generate / validate-analysis`);
+    fatal(`未知子命令: ${cmd ?? "(空)"}。可用：collect / analyze / trace / discover / generate / review / validate-analysis`);
 }

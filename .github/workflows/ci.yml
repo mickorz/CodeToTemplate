@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-fund --no-audit
+      - run: npm run typecheck
+      # 测试全部自包含（test/fixtures/），干净环境无 cache/knowledge 可跑
+      - run: npm test
