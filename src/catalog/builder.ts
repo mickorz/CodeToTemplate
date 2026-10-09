@@ -51,7 +51,7 @@ export interface CapabilityEntry {
     commit: string;
     doc: string;
     matched_keywords: string[];
-    evidence: Array<{ statement: string; file: string; line?: number }>;
+    evidence: Array<{ statement: string; claim_key?: string; file: string; line?: number }>;
     /** P2-0b：审查与证据状态（可信发布门禁） */
     review_status: "reviewed" | "unreviewed";
     evidence_status: "evidenced" | "inferred-only";
@@ -75,7 +75,8 @@ function evidenceLines(a: ModuleAnalysis, keywordRe: RegExp, verdictMap?: Map<st
   }
   matched.sort((x, y) => Number(y.supported) - Number(x.supported)); // supported 优先，稳定排序
   return matched.slice(0, 3).map(({ f }) => ({
-    statement: f.statement.slice(0, 100),
+    statement: f.statement.slice(0, 100), // 截断仅展示层
+    claim_key: f.statement, // P2 第五轮评审修复：内部关联用完整 statement（防截断丢失 verdict 匹配）
     file: f.evidence[0].file,
     line: f.evidence[0].lines?.[0],
   }));
@@ -161,7 +162,7 @@ export function buildCatalog(knowledgeRoot: string): Catalog {
             review_status: (reviewByModule.get(a.module_id) as "reviewed" | "unreviewed") ?? "unreviewed",
             // P2 第三轮评审修复 2：必须有至少一条明确 supported verdict 的匹配事实才算 evidenced，
             // 未送审/unverifiable 的事实不构成可信能力证据（只能出现在非可信检索）
-            evidence_status: c.evidence.some((e) => verdictByModule.get(a.module_id)?.get(e.statement) === "supported")
+            evidence_status: c.evidence.some((e) => verdictByModule.get(a.module_id)?.get(e.claim_key ?? e.statement) === "supported")
               ? "evidenced"
               : "inferred-only",
           });

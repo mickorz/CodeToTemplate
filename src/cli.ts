@@ -405,9 +405,17 @@ async function cmdReview() {
       (entry.verdicts ??= []).push({ statement: v.statement, verdict: "unsupported", reason: `确定性核查拦截：${v.reason}` });
     }
   }
-  const unsupportedCount = llmResults.reduce((s: number, r: any) => s + (r.verdicts ?? []).filter((v: any) => v.verdict === "unsupported").length, 0);
-  // 可信语义（claim 级）：个别 unsupported 不拖垮全模块（被逐条排除），仅当全部送审结论被否决时整体不通过
-  const passed = unsupportedCount === 0 || llmResults.every((r: any) => (r.verdicts ?? []).some((v: any) => v.verdict === "supported"));
+  const rejectedCount = llmResults.reduce((s: number, r: any) => s + (r.verdicts ?? []).filter((v: any) => v.verdict === "unsupported").length, 0);
+
+  // P2 第五轮评审修复：审查整体状态语义化——审查必须实际执行且每模块至少一条正向确认才算通过。
+  // 全部 LLM 审查失败（verdicts 全空且非"无待审条目"）时不得 passed（原漏洞：unsupportedCount===0 短路为 true）。
+  const reviewCompleted = llmResults.every((r: any) =>
+    r.review_status === "reviewed" || /无待审条目/.test(String(r.note ?? "")));
+  const modulesWithClaims = llmResults.filter((r: any) => (r.verdicts ?? []).length > 0);
+  const hasSupportedClaims = modulesWithClaims.length > 0
+    ? modulesWithClaims.every((r: any) => (r.verdicts ?? []).some((v: any) => v.verdict === "supported"))
+    : true; // 无任何可审条目的仓库不因此失败
+  const passed = reviewCompleted && hasSupportedClaims;
 
   writeFileSync(
     path.join(knowledgeDir, "review-report.json"),
@@ -415,12 +423,15 @@ async function cmdReview() {
       schema_version: "1.0", repository: manifest.repository, commit: manifest.commit,
       deterministic: { violations: allViolations, count: allViolations.length },
       llm: llmResults,
-      unsupported_count: unsupportedCount,
+      review_completed: reviewCompleted,
+      has_supported_claims: hasSupportedClaims,
+      rejected_claims: rejectedCount,
+      unsupported_count: rejectedCount,
       passed,
     }, null, 2),
     "utf-8",
   );
-  console.log(`[审查] review-report.json 已写出：passed=${passed}（确定性违规 ${allViolations.length}，unsupported ${unsupported.length}）`);
+  console.log(`[审查] review-report.json 已写出：passed=${passed}（review_completed=${reviewCompleted}，rejected=${rejectedCount}${allViolations.length ? `，确定性违规 ${allViolations.length}` : ""}）`);
 
   // ---- 质量量化（评审要求：性能与质量指标分开记录） ----
   const verdicts = llmResults.flatMap((r: any) => r.verdicts ?? []);

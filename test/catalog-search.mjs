@@ -155,7 +155,27 @@ assert(catalog.capabilities.some((c) => c.id === "crash-recovery" && c.modules.s
   rmSync(tmpK, { recursive: true, force: true });
 }
 
-// P2 第三轮评审修复 2：未送审事实不构成可信能力证据（evidence_status 加严）
+// P2 第五轮评审修复回归：超过 100 字符的 supported 事实不因截断丢失 verdict 关联
+{
+  const longStatement = "令牌桶限流器在刷新窗口内通过 reservoirRefreshAmount 补足容量而非累加且进行中任务不重复计入新容量这是实现刷新语义的关键边界行为".repeat(2);
+  const analysis3 = {
+    schema_version: "1.0", module_id: "x.long", name: "x", summary: "限流令牌桶",
+    facts: [{ statement: longStatement, status: "verified", evidence: [{ file: "a.js", lines: [1, 2] }] }],
+    execution_flows: [], interfaces: [],
+    dependencies: { internal_files: [], external_packages: [] },
+    inferences: [],
+    reuse_guidance: { portable: [], adapt: [], risks: [] },
+    open_questions: [], read_files: [],
+  };
+  const verdictMap2 = new Map([[longStatement, "supported"]]);
+  const caps3 = extractCapabilities(analysis3, { repo: "t", topic: "t", doc: "t" }, verdictMap2);
+  const rl3 = caps3.find((c) => c.id === "rate-limiting");
+  assert(!!rl3 && rl3.evidence.length >= 1, "超长事实进入能力证据");
+  if (rl3) {
+    assert(rl3.evidence[0].claim_key === longStatement, "claim_key 保留完整 statement（截断仅展示层）");
+    assert(rl3.evidence[0].statement.length <= 100, "展示 statement 已截断");
+  }
+}
 {
   const tmpK = path.join(here, "fixtures", "mini-knowledge-multi-noreview");
   cpSync(fixtureRoot, tmpK, { recursive: true });
