@@ -47,13 +47,18 @@ export function validateEvidenceRanges(
   const ranges = analysis.read_ranges ?? [];
 
   // 交叉验证：Agent 自报行段必须出现在 Runner 真实读取日志中（防伪造读取记录）
-  if (ranges.length && runnerReadLog.length) {
-    const realReads = new Set(runnerReadLog);
-    for (const r of ranges) {
-      const asRange = `${r.file}:${r.from}-${r.to}`;
-      const asFile = r.file;
-      if (!realReads.has(asRange) && !realReads.has(asFile)) {
-        errors.push(`read_ranges 与 Runner 实际读取日志不符: ${asRange}（疑似伪造读取记录）`);
+  // P2 最终复审：readLog 为空但自报了行段 = 同样拒绝（Agent 未走协议却声称读过）
+  if (ranges.length) {
+    if (!runnerReadLog.length) {
+      errors.push("Agent 自报 read_ranges 但 Runner 无任何真实读取记录（未走受控协议，疑似伪造）");
+    } else {
+      const realReads = new Set(runnerReadLog);
+      for (const r of ranges) {
+        const asRange = `${r.file}:${r.from}-${r.to}`;
+        const asFile = r.file;
+        if (!realReads.has(asRange) && !realReads.has(asFile)) {
+          errors.push(`read_ranges 与 Runner 实际读取日志不符: ${asRange}（疑似伪造读取记录）`);
+        }
       }
     }
   }
@@ -63,10 +68,12 @@ export function validateEvidenceRanges(
     for (const ev of f.evidence ?? []) {
       if (!ev.file || !readSet.has(ev.file)) continue; // 文件级问题由主契约处理
       if (ev.lines && ranges.length) {
-        const line = ev.lines[0];
-        const covered = ranges.some((r) => r.file === ev.file && line >= r.from && line <= r.to);
-        if (!covered) {
-          errors.push(`fact「${String(f.statement).slice(0, 40)}」证据 ${ev.file}:${line} 超出实际读取行段（证据行级违规）`);
+        const fromLine = ev.lines[0];
+        const toLine = ev.lines[1] ?? fromLine; // P2 最终复审：结束行同样校验（起点合法终点越界也拒绝）
+        const covered = ranges.some((r) => r.file === ev.file && fromLine >= r.from && fromLine <= r.to);
+        const endCovered = ranges.some((r) => r.file === ev.file && toLine >= r.from && toLine <= r.to);
+        if (!covered || !endCovered) {
+          errors.push(`fact「${String(f.statement).slice(0, 40)}」证据 ${ev.file}:${ev.lines.join("-")} 超出实际读取行段（证据行级违规）`);
         }
       }
     }

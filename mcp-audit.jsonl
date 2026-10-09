@@ -9,3 +9,9 @@
 {"at":"2026-10-09T12:37:01.530Z","tool":"read_source_reference","ok":true,"repo":"testrepo","commit":"6ffa3efd4c","file":"source/index.ts","from":1,"to":null}
 {"at":"2026-10-09T12:37:01.535Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"ffffffffff","file":"source/index.ts","error":"commit 不匹配：知识库锁定 6ffa3efd4c，请求 ffffffffff（拒绝读取未锁定版本）"}
 {"at":"2026-10-09T12:37:01.537Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"6ffa3efd4c","file":"etc/passwd","error":"文件不在 manifest 白名单: etc/passwd"}
+{"at":"2026-10-09T12:46:46.664Z","tool":"read_source_reference","ok":true,"repo":"testrepo","commit":"3781855195","file":"source/index.ts","from":1,"to":null}
+{"at":"2026-10-09T12:46:46.667Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"ffffffffff","file":"source/index.ts","error":"commit 不匹配：知识库锁定 3781855195，请求 ffffffffff（拒绝读取未锁定版本）"}
+{"at":"2026-10-09T12:46:46.669Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"3781855195","file":"etc/passwd","error":"文件不在 manifest 白名单: etc/passwd"}
+{"at":"2026-10-09T12:47:03.306Z","tool":"read_source_reference","ok":true,"repo":"testrepo","commit":"7d1667efe8","file":"source/index.ts","from":1,"to":null}
+{"at":"2026-10-09T12:47:03.310Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"ffffffffff","file":"source/index.ts","error":"commit 不匹配：知识库锁定 7d1667efe8，请求 ffffffffff（拒绝读取未锁定版本）"}
+{"at":"2026-10-09T12:47:03.312Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"7d1667efe8","file":"etc/passwd","error":"文件不在 manifest 白名单: etc/passwd"}

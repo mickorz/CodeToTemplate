@@ -161,11 +161,10 @@ export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResu
         const readFiles = rawAnalysis.read_files ?? mod.source_files;
         const normalized = normalizeAnalysis(rawAnalysis, mod, whitelist, readFiles);
         const contract = validateModuleAnalysis(JSON.stringify(normalized), whitelist);
-        // P2 第六轮 P0：证据行级契约 + Runner 真实读取日志交叉验证（确定性拒绝，不依赖 prompt 约束）
+        // P2 最终复审 P0：行级契约失败必须联合拒绝（修 contract.ok 不更新的漏洞：基础契约过但越界时曾可入缓存）
         const rangeCheck = validateEvidenceRanges(normalized, run.readLog);
-        if (!rangeCheck.ok) {
-          contract.errors.push(...rangeCheck.errors);
-        }
+        const allErrors = [...contract.errors, ...rangeCheck.errors];
+        const contractOk = contract.ok && rangeCheck.ok;
         const degraded = (normalized.open_questions ?? []).some((q: string) => String(q).includes("LLM 输出不可解析"));
         if (degraded) {
           const dbgDir = path.join(knowledgeDir, "analysis-debug");
@@ -182,7 +181,7 @@ export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResu
           console.error(`[引擎] 模块 ${mod.id} LLM 输出不可解析（记 failed 不入缓存，其余模块继续）`);
           continue;
         }
-        if (!contract.ok) {
+        if (!contractOk) {
           const dbgDir = path.join(knowledgeDir, "analysis-debug");
           mkdirSync(dbgDir, { recursive: true });
           writeFileSync(path.join(dbgDir, `${mod.id.replace(/[^\w.-]/g, "_")}.raw.json`), run.output, "utf-8");
@@ -191,7 +190,7 @@ export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResu
               module_id: mod.id, status: "failed", cache_hit: false,
               llm_calls: 1, duration_ms: Date.now() - started,
               input_bytes: null, input_tokens: null, output_tokens: null, retry_count: 0,
-              error: `契约失败: ${contract.errors.join("; ").slice(0, 200)}`,
+              error: `契约失败: ${allErrors.join("; ").slice(0, 200)}`,
             },
           });
           console.error(`[引擎] 模块 ${mod.id} 契约失败（原始输出已存 analysis-debug/，其余模块继续）`);
