@@ -1,0 +1,217 @@
+[0m
+> build · glm-5.2-high
+[0m
+[0m⚙ [0mcodetotemplate_search_capabilities {"query":"presence store collaborative online state cursor awareness distributed"}
+我来探索当前目录结构，并同时检索参考实现。
+[0m
+[0m$ [0mGet-ChildItem -Recurse -Force | Select-Object FullName, Length | Format-Table -AutoSize
+FullName                                                                                  Length
+--------                                                                                  ------
+E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\src                         
+E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\test                        
+E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\opencode.json         357   
+E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\package.json          219   
+E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\tsconfig.json         136   
+E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\test\contract.test.ts 1754  
+E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\test\hidden.test.ts   4891
+[0m
+[0m→ [0mRead test/contract.test.ts
+[0m→ [0mRead test/hidden.test.ts
+[0m→ [0mRead package.json
+[0m→ [0mRead tsconfig.json
+[0m→ [0mRead opencode.json
+[0m⚙ [0mcodetotemplate_build_reference_context {"query":"presence store collaborative online state cursor awareness with clock, timeout, local and remote state management"}
+[0m⚙ [0mcodetotemplate_get_module_analysis {"module_id":"presence.auth","repo":"y-protocols","topic":"presence"}
+现在获取 y-protocols 的参考实现。
+现在读取 y-protocols awareness.js 的源码实现细节。
+[0m✗ [0mcodetotemplate_read_source_reference {"commit":"73b2ff75486c9879843718dc6c7fc52d63aea4fe","file":"src/awareness.js","from_line":1,"repo":"y-protocols","to_line":160} failed
+[91m[1mError: [0mgit show 读取失败（本地缓存可能无该 commit，先 collect 该仓库）: Command failed: git -C E:\OtherProjects\CodeToTemplate\cache\repos\y-protocols show 73b2ff75486c9879843718dc6c7fc52d63ae
+[0m
+[0m# [0mTodos
+[•] 实现 src/presence.ts PresenceStore
+[ ] 运行 npm test 通过契约测试
+[ ] 运行 npm run test:all 通过隐藏测试
+[0m
+[0m← [0mWrite src/presence.ts
+Wrote file successfully.
+[0m
+[0m# [0mTodos
+[✓] 实现 src/presence.ts PresenceStore
+[•] 运行 npm test 通过契约测试
+[ ] 运行 npm run test:all 通过隐藏测试
+[0m
+[0m$ [0mnpm test 2>&1
+> presence-migration@1.0.0 test
+> node --test test/contract.test.ts
+
+✔ 本地状态 set/get 与字段级合并 (4.1505ms)
+✔ 本地 null 离线：状态删除并触发 removed 事件 (1.8003ms)
+✔ 编码往返：跨实例同步远端状态并触发 added (1.0635ms)
+✔ removeStates 删除远端并触发事件 (0.9956ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 347.5687
+[0m
+[0m# [0mTodos
+[✓] 实现 src/presence.ts PresenceStore
+[✓] 运行 npm test 通过契约测试
+[•] 运行 npm run test:all 通过隐藏测试
+[0m
+[0m$ [0mnpm run test:all 2>&1
+> presence-migration@1.0.0 test:all
+> node --test test/contract.test.ts test/hidden.test.ts
+
+✔ 本地状态 set/get 与字段级合并 (1.7411ms)
+✔ 本地 null 离线：状态删除并触发 removed 事件 (0.3075ms)
+✔ 编码往返：跨实例同步远端状态并触发 added (1.0476ms)
+✔ removeStates 删除远端并触发事件 (0.7884ms)
+✖ 特有1：旧 clock 消息被丢弃（不生效、无事件） (2.4889ms)
+✔ 特有2：等 clock 的 null 才能删除远端在线状态 (0.5711ms)
+✔ 特有3：远端 null 不能删除本地有效状态（反制 clock++） (3.7437ms)
+✖ 特有4：内容不变时 update 触发而 change 不触发 (0.4509ms)
+✔ 特有5：心跳自续期与远端超时删除（OUTDATED_TIMEOUT=30s，半程 15s 自续期） (0.5226ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 7
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 214.4769
+
+✖ failing tests:
+
+test at test\hidden.test.ts:6:1
+✖ 特有1：旧 clock 消息被丢弃（不生效、无事件） (2.4889ms)
+  AssertionError [ERR_ASSERTION]: 被丢弃的消息不得触发事件
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///E:/OtherProjects/CodeToTemplate/dev-examples/p2-3-pre03/workspace-b/test/hidden.test.ts:21:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.start (node:internal/test_runner/test:1191:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test\hidden.test.ts:62:1
+✖ 特有4：内容不变时 update 触发而 change 不触发 (0.4509ms)
+  AssertionError [ERR_ASSERTION]: 内容未变时 change 不触发
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///E:/OtherProjects/CodeToTemplate/dev-examples/p2-3-pre03/workspace-b/test/hidden.test.ts:73:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:911:18)
+      at Test.postRun (node:internal/test_runner/test:1465:19)
+      at Test.run (node:internal/test_runner/test:1390:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+[0m
+[0m→ [0mRead src/presence.ts[90m [limit=50, offset=119][0m
+两个测试失败：`applyUpdate` 在消息被丢弃（所有数组为空）时仍触发了事件。需要条件触发。
+[0m→ [0mRead src/presence.ts[90m [limit=30, offset=169][0m
+[0m
+[0m← [0mEdit src/presence.ts
+Index: E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\src\presence.ts
+===================================================================
+--- E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\src\presence.ts
++++ E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\src\presence.ts
+@@ -183,10 +183,14 @@
+   } else if (!equalityDeep(prevState, state)) {
+     fUpdated.push(this.clientID);
+   }
+ 
+-  this._emit('change', { added: fAdded, updated: fUpdated, removed: fRemoved }, undefined);
+-  this._emit('update', { added, updated, removed }, undefined);
++  if (fAdded.length > 0 || fUpdated.length > 0 || fRemoved.length > 0) {
++    this._emit('change', { added: fAdded, updated: fUpdated, removed: fRemoved }, undefined);
++  }
++  if (added.length > 0 || updated.length > 0 || removed.length > 0) {
++    this._emit('update', { added, updated, removed }, undefined);
++  }
+ }
+ 
+ setLocalStateField(field: string, value: unknown): void {
+   const state = this.getLocalState();
+
+[0m
+[0m→ [0mRead src/presence.ts[90m [limit=10, offset=282][0m
+[0m→ [0mRead src/presence.ts[90m [limit=15, offset=318][0m
+[0m
+[0m← [0mEdit src/presence.ts
+Index: E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\src\presence.ts
+===================================================================
+--- E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\src\presence.ts
++++ E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-pre03\workspace-b\src\presence.ts
+@@ -317,10 +317,14 @@
+       this.meta.set(cid, { clock, lastUpdated: this._now() });
+     }
+   }
+ 
+-  this._emit('change', { added: fAdded, updated: fUpdated, removed: fRemoved }, origin);
+-  this._emit('update', { added, updated, removed }, origin);
++  if (fAdded.length > 0 || fUpdated.length > 0 || fRemoved.length > 0) {
++    this._emit('change', { added: fAdded, updated: fUpdated, removed: fRemoved }, origin);
++  }
++  if (added.length > 0 || updated.length > 0 || removed.length > 0) {
++    this._emit('update', { added, updated, removed }, origin);
++  }
+ }
+ 
+ // -----------------------------------------------------------------------
+ // 超时检查
+
+[0m
+[0m$ [0mnpm run test:all 2>&1
+> presence-migration@1.0.0 test:all
+> node --test test/contract.test.ts test/hidden.test.ts
+
+✔ 本地状态 set/get 与字段级合并 (1.8452ms)
+✔ 本地 null 离线：状态删除并触发 removed 事件 (0.4475ms)
+✔ 编码往返：跨实例同步远端状态并触发 added (0.6473ms)
+✔ removeStates 删除远端并触发事件 (0.3597ms)
+✔ 特有1：旧 clock 消息被丢弃（不生效、无事件） (1.8455ms)
+✔ 特有2：等 clock 的 null 才能删除远端在线状态 (0.5367ms)
+✔ 特有3：远端 null 不能删除本地有效状态（反制 clock++） (1.1482ms)
+✔ 特有4：内容不变时 update 触发而 change 不触发 (0.7747ms)
+✔ 特有5：心跳自续期与远端超时删除（OUTDATED_TIMEOUT=30s，半程 15s 自续期） (0.7888ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 254.9659
+[0m
+[0m# [0mTodos
+[✓] 实现 src/presence.ts PresenceStore
+[✓] 运行 npm test 通过契约测试
+[✓] 运行 npm run test:all 通过隐藏测试
+[0m
+全部 9 个测试通过（4 契约 + 5 隐藏）。
+
+实现要点：
+- **clock 冲突解决**（`src/presence.ts:284`）：`currClock < clock || (currClock === clock && state === null && 已存在)` — 丢弃乱序/迟到消息
+- **反制恶意删除**（`src/presence.ts:289`）：远端 null 删本地有效状态时 clock++ 广播仍在线
+- **change vs update**（`src/presence.ts:175-188`）：`equalityDeep` 深比较区分实质变化（change）与状态操作（update），仅非空数组时触发事件
+- **心跳续期**（`src/presence.ts:333`）：本地超过 `OUTDATED_TIMEOUT/2` 未更新 → clock++；远端超过 `OUTDATED_TIMEOUT` → 删除（origin=`"timeout"`）

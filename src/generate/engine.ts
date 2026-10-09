@@ -45,6 +45,7 @@ export interface EngineOptions {
   refreshModules?: string[];
   resume: boolean;
   concurrency?: number; // 默认 2（CLAUDE.md：opencode run 并发上限）
+  contextExtra?: Record<string, unknown>; // 附加到 Agent 上下文（如符号表，targeted 模式用）
 }
 
 export interface EngineResult {
@@ -118,6 +119,7 @@ export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResu
         repository: manifest.repository,
         commit: manifest.commit,
         whitelist: [...whitelist],
+        ...(opts.contextExtra ?? {}),
         modules: [{ ...mod, source_files: mod.source_files.filter((f) => whitelist.has(f)) }],
       };
       const ctxPath = path.join(knowledgeDir, "analysis-context.tmp.json");

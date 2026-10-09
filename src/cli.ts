@@ -231,14 +231,26 @@ async function cmdGenerate() {
 
   console.log(`[生成] 模块 ${modules.length} 个，agent=${args.values.agent}${args.values.only ? `，only=${args.values.only}` : ""}`);
 
-  // 1. 逐模块引擎（缓存/失败隔离/2 并发）
+      // 1. 逐模块引擎（缓存/失败隔离/2 并发）——ctx 注入符号表（targeted 模式用）
+  const sourceMapPath = path.join(knowledgeDir, "source-map.json");
+  let symbols: Record<string, any[]> | undefined;
+  if (existsSync(sourceMapPath)) {
+    try {
+      const sm = JSON.parse(readFileSync(sourceMapPath, "utf-8"));
+      symbols = {};
+      for (const m of modules) for (const f of m.source_files) {
+        if (sm.files[f]?.symbols?.length) symbols[f] = sm.files[f].symbols;
+      }
+    } catch { /* 无符号表则 targeted 退化 */ }
+  }
   const engine = await runGenerateEngine({
     knowledgeDir, repoDir, manifest, modules,
     agentScript: args.values.agent,
-    agentCmdLabel: args.values.agent,
+    agentCmdLabel: args.values.agent + (process.env.CTT_READ_MODE === "targeted" ? ":targeted" : ""),
     only: args.values.only?.split(",").map((s) => s.trim()).filter(Boolean),
     refreshModules: args.values["refresh-module"]?.split(",").map((s) => s.trim()).filter(Boolean),
     resume: args.values.resume === true,
+    contextExtra: { symbols },
   });
 
   if (engine.interrupted) {

@@ -1,0 +1,94 @@
+[0m
+> build · glm-5.2-high
+[0m
+[0m⚙ [0mcodetotemplate_search_capabilities {"query":"concurrency limit priority queue task scheduler pause resume"}
+[0m
+[0m$ [0mls -Force
+Ŀ¼: E:\OtherProjects\CodeToTemplate\dev-examples\p2-3-migration\workspace-b
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d-----         2026/10/9      9:09                src                                                                  
+d-----         2026/10/9      9:09                test                                                                 
+-a----         2026/10/9      9:16            357 opencode.json                                                        
+-a----         2026/10/9      9:09            153 package.json                                                         
+-a----         2026/10/9      9:09            136 tsconfig.json
+[0m
+[0m✱ [0mGlob "test/**/*"[90m 1 match[0m
+[0m✱ [0mGlob "src/**/*"[90m 0 matches[0m
+[0m⚙ [0mcodetotemplate_get_module_analysis {"module_id":"scheduling.index","repo":"p-queue"}
+[0m⚙ [0mcodetotemplate_get_module_analysis {"module_id":"scheduling.advanced","repo":"p-queue"}
+[0m
+[0m$ [0mcat package.json; echo "---TSCONFIG---"; cat tsconfig.json; echo "---OPENCODE---"; cat opencode.json
+{ "name": "scheduler-migration", "version": "1.0.0", "type": "module", "private": true,
+  "scripts": { "test": "node --test test/acceptance.test.ts" } }
+---TSCONFIG---
+{ "compilerOptions": { "target": "ES2022", "module": "NodeNext", "strict": true, "allowImportingTsExtensions": true, "noEmit": true } }
+---OPENCODE---
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "codetotemplate": {
+      "type": "local",
+      "command": ["node", "E:/OtherProjects/CodeToTemplate/src/mcp/server.ts", "E:/OtherProjects/CodeToTemplate/knowledge"],
+      "enabled": true,
+      "environment": { "CTT_REPOS_ROOT": "E:/OtherProjects/CodeToTemplate/cache/repos" }
+    }
+  }
+}
+[0m
+只有测试文件需要先读懂，让我读取它。
+[0m→ [0mRead test/acceptance.test.ts
+[0m✗ [0mcodetotemplate_read_source_reference {"commit":"180ab9e25cd10b6f548767d7176076b50d25e188","file":"source/index.ts","from_line":1,"repo":"p-queue","to_line":130} failed
+[91m[1mError: [0mgit show 读取失败（本地缓存可能无该 commit，先 collect 该仓库）: Command failed: git -C E:\OtherProjects\CodeToTemplate\cache\repos\p-queue show 180ab9e25cd10b6f548767d7176076b50d25e188
+[0m✗ [0mcodetotemplate_read_source_reference {"commit":"180ab9e25cd10b6f548767d7176076b50d25e188","file":"source/index.ts","from_line":195,"repo":"p-queue","to_line":330} failed
+[91m[1mError: [0mgit show 读取失败（本地缓存可能无该 commit，先 collect 该仓库）: Command failed: git -C E:\OtherProjects\CodeToTemplate\cache\repos\p-queue show 180ab9e25cd10b6f548767d7176076b50d25e188
+[0m✗ [0mcodetotemplate_read_source_reference {"commit":"180ab9e25cd10b6f548767d7176076b50d25e188","file":"source/index.ts","from_line":435,"repo":"p-queue","to_line":580} failed
+[91m[1mError: [0mgit show 读取失败（本地缓存可能无该 commit，先 collect 该仓库）: Command failed: git -C E:\OtherProjects\CodeToTemplate\cache\repos\p-queue show 180ab9e25cd10b6f548767d7176076b50d25e188
+[0m✗ [0mcodetotemplate_read_source_reference {"commit":"180ab9e25cd10b6f548767d7176076b50d25e188","file":"source/index.ts","from_line":590,"repo":"p-queue","to_line":720} failed
+[91m[1mError: [0mgit show 读取失败（本地缓存可能无该 commit，先 collect 该仓库）: Command failed: git -C E:\OtherProjects\CodeToTemplate\cache\repos\p-queue show 180ab9e25cd10b6f548767d7176076b50d25e188
+现在我完全理解了测试要求。让我读取 p-queue 的关键源码作为参考实现。
+[0m✗ [0mcodetotemplate_read_source_reference {"commit":"180ab9e25cd10b6f548767d7176076b50d25e188","file":"source/priority-queue.ts","from_line":1,"repo":"p-queue","to_line":110} failed
+[91m[1mError: [0mgit show 读取失败（本地缓存可能无该 commit，先 collect 该仓库）: Command failed: git -C E:\OtherProjects\CodeToTemplate\cache\repos\p-queue show 180ab9e25cd10b6f548767d7176076b50d25e188
+[0m⚙ [0mcodetotemplate_build_reference_context {"query":"TypeScript task scheduler with concurrency limit, priority queue, pause and resume, add returns promise, onIdle resolves when all tasks done"}
+源码缓存未就绪，但我已从模块分析获得足够详细的已验证事实。让我获取一份整合的最小参考上下文。
+[0m
+[0m← [0mWrite src/scheduler.ts
+Wrote file successfully.
+[0m
+[0m$ [0mnpm test
+> scheduler-migration@1.0.0 test
+> node --test test/acceptance.test.ts
+
+✔ 并发上限：concurrency=2 时同时运行的任务不超过 2 (188.8895ms)
+✔ 优先级：concurrency=1 时高优先级先执行 (46.0291ms)
+✔ 暂停与恢复：pause 后新任务不启动，start 后继续 (60.6815ms)
+✔ 串行边界：concurrency=1 严格串行 (63.5334ms)
+✔ 返回值与错误传播 (0.8445ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 527.1613
+[0m
+5/5 全部通过。让我也确认 TypeScript 类型检查通过。
+[0m$ [0mnpx tsc --noEmit 2>&1
+(no output)
+[0m
+TypeScript 严格模式类型检查通过，无任何错误。
+
+5 个测试全部通过：
+
+| 测试 | 结果 | 关键验证点 |
+|------|------|------------|
+| 并发上限 | ✅ 188ms | concurrency=2，peak=2 |
+| 优先级 | ✅ 46ms | 同步入队后按 priority 降序执行 [10,5,1] |
+| 暂停/恢复 | ✅ 60ms | pause 后第二个任务不启动，start 后继续 |
+| 串行边界 | ✅ 63ms | concurrency=1 严格 FIFO [1,2,3,4] |
+| 返回值/错误 | ✅ 0.8ms | 值传播 42，错误传播 /boom/ |
+
+核心设计来自 p-queue 的已验证实现模式，关键点：`tryToStartAnother` 用 `queueMicrotask` 延迟一拍调度，并在调度时**捕获暂停快照**——这样同步连续入队的任务在微任务阶段统一按优先级出队（测试2），而 pause 前入队的任务仍能在微任务中启动（测试3）。

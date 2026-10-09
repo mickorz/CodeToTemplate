@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "codetotemplate": {
+      "type": "local",
+      "command": ["node", "E:/OtherProjects/CodeToTemplate/src/mcp/server.ts", "E:/OtherProjects/CodeToTemplate/knowledge"],
+      "enabled": true,
+      "environment": { "CTT_REPOS_ROOT": "E:/OtherProjects/CodeToTemplate/cache/repos" }
+    }
+  }
+}

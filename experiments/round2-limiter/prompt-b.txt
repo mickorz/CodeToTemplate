@@ -1,0 +1,8 @@
+在当前目录实现一个 TypeScript 令牌桶限流器 SimpleLimiter。接口契约：
+- 构造：new SimpleLimiter({ reservoir, reservoirRefreshAmount, reservoirRefreshInterval })——初始容量 reservoir 个令牌；每 reservoirRefreshInterval 毫秒将容量补至 reservoirRefreshAmount
+- schedule(fn)：fn 为异步函数。有容量时立即扣减并执行；无容量时排队等待下次刷新。返回 Promise（结果/错误传播）
+- stop()：立即停止——刷新定时器清理；排队中任务 reject（错误消息含 "stop"）；此后新 schedule 也 reject
+- reservoir()：返回当前剩余容量（数字）
+入口 src/limiter.ts。运行 npm test（显性验收测试）直到通过。禁止修改 test/ 下文件。
+
+你可以使用 codetotemplate MCP 工具（search_capabilities / build_reference_context / get_module_analysis / read_source_reference）检索可信的参考实现与源码证据。

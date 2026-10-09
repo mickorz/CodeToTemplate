@@ -9,8 +9,10 @@
  * 输出 done：{module_id, verdicts: [{statement, verdict: supported|unsupported|unverifiable, reason}]}
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import { makeLineReader } from "./lib/line-protocol.mjs";
 
 const contextPath = process.argv[2];
@@ -37,15 +39,20 @@ const LLM_CMD = process.env.LLM_CMD || "opencode run";
 const MAX_FILE_CHARS = 60_000;
 
 function callLLM(prompt) {
+  // P2-4-1：隔离 cwd（与 llm-analyze 同策略）
+  const sandboxDir = mkdtempSync(path.join(tmpdir(), "ctt-rev-"));
   let out;
   try {
     out = execFileSync(LLM_CMD, {
       input: prompt, encoding: "utf-8", timeout: 10 * 60 * 1000,
       maxBuffer: 16 * 1024 * 1024, shell: true, stdio: ["pipe", "pipe", "pipe"],
+      cwd: sandboxDir,
     });
   } catch (e) {
     if (e.stdout) return e.stdout;
     throw e;
+  } finally {
+    try { rmSync(sandboxDir, { recursive: true, force: true }); } catch { /* 尽力 */ }
   }
   return out;
 }

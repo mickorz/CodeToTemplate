@@ -25,7 +25,7 @@ export interface AgentRunResult {
   readLog: string[];
 }
 
-const PROTOCOL_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 活动感知：收到 Agent 消息即重置；LLM 思考期间允许长静默
+const PROTOCOL_IDLE_TIMEOUT_MS = Number(process.env.CTT_AGENT_IDLE_TIMEOUT_MS) || 20 * 60 * 1000; // 活动感知：收到 Agent 消息即重置；可用环境变量覆盖（测试用）
 
 /** 运行 Discovery Agent 子进程，代理全部源码读取（白名单制）；onSpawn 暴露 pid 供外部中断清理 */
 export function runAgent(
@@ -86,6 +86,23 @@ export function runAgent(
           child.stdin.write(JSON.stringify({ ok: true, path: p, content }) + "\n");
         } catch (e) {
           child.stdin.write(JSON.stringify({ ok: false, error: `读取失败: ${(e as Error).message}` }) + "\n");
+        }
+      } else if (msg.op === "read_range") {
+        // P2-4-3 按需读取：行段级源码访问（白名单 + 200 行/次上限）
+        const p = String(msg.path ?? "");
+        const from = Math.max(1, Number(msg.from ?? 1));
+        const to = Math.min(from + 199, Number(msg.to ?? from + 199));
+        if (!whitelist.has(p)) {
+          child.stdin.write(JSON.stringify({ ok: false, error: `白名单外路径拒绝读取: ${p}` }) + "\n");
+        } else {
+          try {
+            const lines = readFileSync(path.join(repoDir, p), "utf-8").split(/\r?\n/);
+            const seg = lines.slice(from - 1, to).map((l, i) => `${from + i}\t${l}`).join("\n");
+            readLog.push(`${p}:${from}-${to}`);
+            child.stdin.write(JSON.stringify({ ok: true, path: p, from, to, total_lines: lines.length, content: seg }) + "\n");
+          } catch (e) {
+            child.stdin.write(JSON.stringify({ ok: false, error: `读取失败: ${(e as Error).message}` }) + "\n");
+          }
         }
       } else if (msg.op === "done") {
         output = typeof msg.output === "string" ? msg.output : JSON.stringify(msg.output ?? null);

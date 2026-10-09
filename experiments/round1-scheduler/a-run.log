@@ -1,0 +1,61 @@
+[0m
+> build · glm-5.2-high
+[0m
+我将首先查看当前目录结构和测试文件，以确切了解预期的结果。
+[0m✱ [0mGlob "**/*"[90m in . · 3 matches[0m
+[0m
+[0m$ [0mls -la
+Get-ChildItem : �Ҳ�����������ơ�la��ƥ��Ĳ�����
+����λ�� ��:1 �ַ�: 4
++ ls -la
++    ~~~
+    + CategoryInfo          : InvalidArgument: (:) [Get-ChildItem]��ParameterBindingException
+    + FullyQualifiedErrorId : NamedParameterNotFound,Microsoft.PowerShell.Commands.GetChildItemCommand
+[0m
+[0m→ [0mRead package.json
+[0m→ [0mRead tsconfig.json
+[0m→ [0mRead test/acceptance.test.ts
+[0m→ [0mRead package.json
+让我阅读所有文件，以便了解完整情况。
+[0m→ [0mRead tsconfig.json
+[0m→ [0mRead test/acceptance.test.ts
+现在我明白了关键的设计挑战。让我分析一下测试：
+
+- **优先级测试**：3 个任务同步添加（优先级分别为 1、10、5），必须按顺序执行 [10, 5, 1]。需要延迟选择任务，以便所有任务都进入队列。
+- **暂停测试**：执行 `add(first)` 然后同步执行 `pause()` —— 但第一个任务仍然必须启动。这意味着在 `pause()` 之前调度的泵（pump）仍然需要触发。
+
+解决方案：`#pump()` 在**调度时**检查 `paused`（如果暂停则不调度新的微任务），但已调度的微任务总是会执行（不重新检查 `paused`）。
+[0m
+[0m$ [0mTest-Path -LiteralPath "src"
+True
+[0m
+[0m✱ [0mGlob "src/**/*"[90m in . · 0 matches[0m
+[0m
+[0m← [0mWrite src/scheduler.ts
+Wrote file successfully.
+[0m
+`src` 目录虽然存在，但是空的。让我来创建调度器。
+现在让我运行一下测试：
+[0m$ [0mnpm test
+> scheduler-migration@1.0.0 test
+> node --test test/acceptance.test.ts
+
+✔ 并发上限：concurrency=2 时同时运行的任务不超过 2 (179.0797ms)
+✔ 优先级：concurrency=1 时高优先级先执行 (44.3098ms)
+✔ 暂停与恢复：pause 后新任务不启动，start 后继续 (76.4606ms)
+✔ 串行边界：concurrency=1 严格串行 (60.872ms)
+✔ 返回值与错误传播 (0.8377ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 520.3736
+[0m
+5 个测试全部通过。核心设计点：
+
+- **延迟选取**：`#pump()` 用 `queueMicrotask` 延迟任务选取，确保同步入队的任务都进队列后再按优先级挑选。
+- **pause 语义**：`pause()` 在调度时拦截（不安排新的微任务），但已安排的微任务照常执行——这样 `add` 后同步 `pause()`，第一个任务仍能启动，第二个任务被挡住。
+- **优先级队列**：线性扫描取 max，同优先级 FIFO（`>` 严格大于，不交换先入队者）。

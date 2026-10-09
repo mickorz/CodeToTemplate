@@ -6,8 +6,10 @@
  * 规范化与结构补齐使用共享 normalize.ts（与离线验证 --validate-analysis 同一路径）。
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import { makeLineReader } from "./lib/line-protocol.mjs";
 import { normalizeAnalysis, PROMPT_VERSION } from "../src/generate/normalize.ts";
 
@@ -24,8 +26,11 @@ function request(payload) {
   process.stdout.write(JSON.stringify(payload) + "\n");
 }
 
-async function readViaProtocol(path) {
-  request({ op: "read_file", path });
+async function readViaProtocol(path, from, to) {
+  const payload = from !== undefined
+    ? { op: "read_range", path, from, to }
+    : { op: "read_file", path };
+  request(payload);
   const line = await readLine();
   try { return JSON.parse(line); } catch { return { ok: false, error: "协议应答解析失败" }; }
 }
@@ -42,6 +47,7 @@ function isTestFile(p) {
 }
 
 function callLLM(prompt) {
+  const sandboxDir = mkdtempSync(path.join(tmpdir(), "ctt-llm-"));
   let out;
   try {
     out = execFileSync(LLM_CMD, {
@@ -51,13 +57,28 @@ function callLLM(prompt) {
       maxBuffer: 16 * 1024 * 1024,
       shell: true, // Windows 下 opencode 为 .cmd shim；命令串固定，prompt 走 stdin
       stdio: ["pipe", "pipe", "pipe"],
+      cwd: sandboxDir,
     });
   } catch (e) {
     // opencode（Bun）退出时尾部异步 flush 可能 EPIPE 致非零退出码，但 stdout 已完整捕获
     if (e.stdout) { console.error("[llm-analyze] LLM 退出码非零但输出已捕获，继续"); return e.stdout; }
     throw e;
+  } finally {
+    try { rmSync(sandboxDir, { recursive: true, force: true }); } catch { /* 清理尽力 */ }
   }
   return out;
+}
+
+/** P2-4-1 输出侧防泄检测：LLM 输出含疑似宿主敏感内容时拒绝采纳（纵深防御第三层） */
+const LEAK_PATTERNS = /BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|ssh-rsa AAAA|ssh-ed25519 AAAA|aws_access_key_id|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|password\s*=\s*['"][^'"]{6,}/i;
+
+function scanForLeaks(text, label) {
+  const hit = LEAK_PATTERNS.exec(text);
+  if (hit) {
+    console.error(`[llm-analyze] ${label} 输出疑似泄露敏感内容（模式：${hit[0].slice(0, 12)}...），已拒绝采纳`);
+    return true;
+  }
+  return false;
 }
 
 /** 从 LLM 输出提取 JSON（容忍杂讯/代码块/多对象，逐候选解析） */
@@ -99,20 +120,37 @@ const SCHEMA_PROMPT = `你是一名资深代码架构分析师。基于下面提
 5. reuse_guidance 基于已见源码给出可移植部分/需适配部分/风险
 （prompt_version: ${PROMPT_VERSION}）`;
 
+const READ_MODE = process.env.CTT_READ_MODE || "full"; // full：整文件入 prompt；targeted：符号清单 + read_range 按需深读（P2-4-3）
+
 async function analyzeModule(mod) {
   const fileContents = [];
   const readFiles = [];
-  for (const f of mod.source_files) {
-    const resp = await readViaProtocol(f);
-    if (resp && resp.ok) {
-      readFiles.push(f);
+
+  if (READ_MODE === "targeted" && ctx.symbols) {
+    // 两阶段：第一阶段只给符号清单（文件+符号+行号），Agent 判断后按需 read_range
+    for (const f of mod.source_files) {
+      if (!ctx.symbols[f]) continue; // 无符号表的文件退化为整读
       const budget = isTestFile(f) ? MAX_TEST_CHARS : MAX_CORE_CHARS;
-      const isTest = isTestFile(f);
-      const truncated = resp.content.length > budget;
+      readFiles.push(f);
+      const sym = ctx.symbols[f];
       fileContents.push(
-        `### 文件 ${f}${isTest ? "（测试文件，已降权截断：用于验证行为，非核心实现）" : ""}${truncated ? "（内容超预算已截断，截断处之后不可作为证据）" : ""}\n` +
-        (truncated ? resp.content.slice(0, budget) + "\n...[已截断]" : resp.content)
+        `### 文件 ${f}（符号清单，共 ${sym.length} 个符号；可用 read_range 协议按需读取具体行段）\n` +
+        sym.slice(0, 60).map((s) => `  L${s.line} ${s.kind} ${s.name}`).join("\n")
       );
+    }
+  } else {
+    for (const f of mod.source_files) {
+      const resp = await readViaProtocol(f);
+      if (resp && resp.ok) {
+        readFiles.push(f);
+        const budget = isTestFile(f) ? MAX_TEST_CHARS : MAX_CORE_CHARS;
+        const isTest = isTestFile(f);
+        const truncated = resp.content.length > budget;
+        fileContents.push(
+          `### 文件 ${f}${isTest ? "（测试文件，已降权截断：用于验证行为，非核心实现）" : ""}${truncated ? "（内容超预算已截断，截断处之后不可作为证据）" : ""}\n` +
+          (truncated ? resp.content.slice(0, budget) + "\n...[已截断]" : resp.content)
+        );
+      }
     }
   }
 
@@ -125,7 +163,10 @@ summary_seed: ${mod.summary || "(无)"}
 声明的依赖模块: ${(mod.dependencies || []).join(", ") || "(无)"}
 
 ## 模块源码（共 ${fileContents.length} 个文件，行号从 1 开始）
-${fileContents.join("\n\n")}
+${fileContents.join("\n\n")}${READ_MODE === "targeted" && ctx.symbols ? `
+
+## 按需深读
+上述为符号清单。你必须先确定与模块能力相关的关键符号，再通过 read_range 协议读取其行段（每次至多 200 行）获取源码细节；evidence 行号必须来自实际读到的行段。关键机制的 facts 不得凭符号名臆测。` : ""}
 
 ## 输出
 只输出上述结构的 JSON。`;
@@ -134,7 +175,13 @@ ${fileContents.join("\n\n")}
   let raw = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      raw = extractJson(callLLM(prompt));
+      const outText = callLLM(prompt);
+      if (scanForLeaks(outText, mod.id)) {
+        console.error(`[llm-analyze] 模块 ${mod.id} 第 ${attempt} 次输出被防泄检测拦截`);
+        if (attempt === 2) { raw = null; break; }
+        continue;
+      }
+      raw = extractJson(outText);
       break;
     } catch (e) {
       console.error(`[llm-analyze] 第 ${attempt} 次尝试失败: ${e.message}`);

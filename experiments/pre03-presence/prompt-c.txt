@@ -1,0 +1,15 @@
+在当前目录实现一个 TypeScript 协作在线状态存储 PresenceStore（分布式协作中共享用户状态/光标/在线情况的协议核心）。公开契约：
+
+- 构造：new PresenceStore(clientID: number, opts?: { now?: () => number })——now 为可注入时钟（默认 Date.now），用于过期判断
+- 常量：OUTDATED_TIMEOUT = 30000（远端状态超过该毫秒数未更新则视为离线）
+- getLocalState(): object | null；setLocalState(state | null)：null 表示本地离线（删除状态）；setLocalStateField(field, value)：字段级合并（本地状态非 null 时）
+- getStates(): Map<clientID, state>；getMeta(): Map<clientID, { clock: number, lastUpdated: number }>
+- removeStates(clients: number[], origin?)：标记远端离线并从在线列表删除，触发 removed 事件
+- encodeUpdate(clients: number[]): Uint8Array —— 将指定客户端的当前状态（含 clock）序列化；applyUpdate(update, origin?)：应用远端更新。消息必须携带逻辑时钟 clock，接收侧按 clock 决定接受与否（具体语义自定，但必须能通过 npm test 中的同步往返用例）
+- 事件：on("update" | "change", cb)——负载 { added: number[], updated: number[], removed: number[] } 与 origin。update 与 change 的触发条件存在差异（change 语义：仅实质变化时）
+- checkTimeout(): void —— 手动执行过期检查（为可测试性暴露；内部处理本地保活与远端过期删除，删除远端时事件 origin 为 "timeout"）
+- destroy(): 清理资源
+
+入口 src/presence.ts。运行 npm test 直到通过（公开契约测试在 test/contract.test.ts）。禁止修改 test/ 下文件。注意：实现应考虑协议健壮性（乱序/迟到消息、离线声明、恶意删除等分布式协作场景的真实处理）。
+
+当前目录 vendor/ 下有 yjs/y-protocols 项目（MIT，协作协议库）的源码可直接阅读参考（src/awareness.js 与本次需求最相关）。

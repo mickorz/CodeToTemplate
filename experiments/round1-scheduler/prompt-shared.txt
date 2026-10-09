@@ -1,0 +1,6 @@
+在当前目录实现一个 TypeScript 任务调度器。需求：
+1. 并发上限控制（构造参数 concurrency）
+2. 优先级调度（add 选项 priority，数值大者先执行）
+3. pause() 暂停：暂停后不启动新任务（运行中的任务不中断）；start() 恢复
+4. add(fn, options) 返回 Promise（结果与错误正常传播）；onIdle() 返回 Promise（全部任务完成后 resolve）
+入口文件 src/scheduler.ts，导出 class Scheduler。完成后运行 npm test 直到全部通过。禁止修改 test/ 目录下的任何文件。
