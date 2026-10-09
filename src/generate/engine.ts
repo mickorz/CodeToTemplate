@@ -22,6 +22,7 @@ import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { Manifest } from "../collector/manifest.ts";
 import { runAgent, type AgentRunResult } from "../discovery/runner.ts";
+import { ProcessSupervisor } from "../discovery/kill.ts";
 import { validateModuleAnalysis } from "./analysis-contract.ts";
 import { normalizeAnalysis } from "./normalize.ts";
 import { computeCacheKey, readCache, writeCache, appendJournal, type JournalEntry } from "./cache.ts";
@@ -55,19 +56,7 @@ export interface EngineResult {
   interrupted: boolean;
 }
 
-/** Windows 下杀整棵子进程树（opencode 的 Bun 子进程用 child.kill 杀不干净） */
-export function killTree(pid: number | undefined): void {
-  if (!pid) return;
-  try {
-    if (process.platform === "win32") {
-      execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-    } else {
-      process.kill(-pid, "SIGKILL");
-    }
-  } catch {
-    /* 进程已退出 */
-  }
-}
+/** P0-2：进程树清理已移至 discovery/kill.ts（统一路径），此处不再重复定义 */
 
 export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResult> {
   const { knowledgeDir, repoDir, manifest } = opts;
@@ -82,11 +71,12 @@ export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResu
 
   const results = new Map<string, { analysis?: any; entry: JournalEntry }>();
   let interrupted = false;
-  let activeChildPid: number | undefined;
+  const supervisor = new ProcessSupervisor(); // P0-2：并发安全的全部活动子进程追踪
 
   const onInterrupt = () => {
     interrupted = true;
-    killTree(activeChildPid);
+    const killed = supervisor.killAll();
+    console.error(`[引擎] SIGINT：已清理 ${killed.length} 棵活动进程树`);
   };
   process.once("SIGINT", onInterrupt);
 
@@ -122,15 +112,14 @@ export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResu
         ...(opts.contextExtra ?? {}),
         modules: [{ ...mod, source_files: mod.source_files.filter((f) => whitelist.has(f)) }],
       };
-      const ctxPath = path.join(knowledgeDir, "analysis-context.tmp.json");
-      writeFileSync(ctxPath, JSON.stringify(ctx), "utf-8");
-
+      const moduleCtxPath = path.join(knowledgeDir, `analysis-context-${mod.id.replace(/[^\w.-]/g, "_")}.tmp.json`); // P0-2：每模块独立 ctx（并发交叉污染修复）
+      writeFileSync(moduleCtxPath, JSON.stringify(ctx), "utf-8");
       let run: AgentRunResult | null = null;
       try {
         console.log(`[引擎] 分析模块 ${mod.id}（${mod.source_files.length} 文件）...`);
-        run = await runAgent(opts.agentScript, ctxPath, repoDir, whitelist, (pid) => { activeChildPid = pid; });
+        run = await runAgent(opts.agentScript, moduleCtxPath, repoDir, whitelist, (pid) => { supervisor.register(pid); });
       } finally {
-        activeChildPid = undefined;
+        // 子进程已随 runAgent 返回而退出；已死 pid 对 killAll 无害，无需精确摘除
       }
 
       if (interrupted) {

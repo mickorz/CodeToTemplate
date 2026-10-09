@@ -16,6 +16,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { killTree } from "./kill.ts";
 
 export interface AgentRunResult {
   ok: boolean;
@@ -50,7 +51,7 @@ export function runAgent(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try { child.kill(); } catch { /* 已退出 */ }
+      killTree(child.pid); // P0-2 修复：统一树清理（child.kill 在 Windows 杀不干净嵌套后代）
       resolve({ ...result, readLog });
     };
 

@@ -1,9 +1,13 @@
 /**
- * llm-analyze.mjs —— 真实 LLM 分析 Agent（P1-4，引擎改造版）
+ * llm-analyze.mjs —— 真实 LLM 分析 Agent（P2-4 修复版：真两阶段 targeted）
  *
- * 引擎（engine.ts）逐模块调用本 Agent（单模块 ctx），缓存/失败隔离由引擎负责。
- * 隔离设计（内容级）：源码经受控读取协议读出后嵌入 prompt，LLM CLI 只收到文本。
- * 规范化与结构补齐使用共享 normalize.ts（与离线验证 --validate-analysis 同一路径）。
+ * 模式（CTT_READ_MODE）：
+ *   full     整文件（核心 60KB / 测试降权 8KB）入 prompt，一次 LLM 调用
+ *   targeted 两阶段（评审 P0-1 修复）：符号清单 -> LLM 规划行段 -> 受控协议实读
+ *            -> 二次 LLM 基于真实片段生成；evidence 行号约束在实际读取范围内
+ *
+ * 隔离（security-model.md）：源码经白名单协议读出后嵌入 prompt；LLM CLI 在
+ * 一次性临时空目录运行；输出经防泄扫描。
  */
 
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
@@ -21,32 +25,32 @@ if (!contextPath) {
 
 const ctx = JSON.parse(readFileSync(contextPath, "utf-8"));
 const readLine = makeLineReader();
+const READ_MODE = process.env.CTT_READ_MODE || "full";
 
 function request(payload) {
   process.stdout.write(JSON.stringify(payload) + "\n");
 }
 
-async function readViaProtocol(path, from, to) {
+async function readViaProtocol(p, from, to) {
   const payload = from !== undefined
-    ? { op: "read_range", path, from, to }
-    : { op: "read_file", path };
+    ? { op: "read_range", path: p, from, to }
+    : { op: "read_file", path: p };
   request(payload);
   const line = await readLine();
   try { return JSON.parse(line); } catch { return { ok: false, error: "协议应答解析失败" }; }
 }
 
-/** LLM 命令：默认 opencode run，可用环境变量替换；prompt 经 stdin 传递 */
 const LLM_CMD = process.env.LLM_CMD || "opencode run";
 const LLM_TIMEOUT_MS = 10 * 60 * 1000;
-/** 源码文件进入 prompt 的预算：核心实现 60KB；测试文件降权 8KB（P1：评审建议，测试用于验证行为而非深读） */
 const MAX_CORE_CHARS = 60_000;
 const MAX_TEST_CHARS = 8_000;
 
 function isTestFile(p) {
-  return /(^|\/)(test|tests|test-d|__tests__)(\/|$)/.test(p) || /\.test\.[cm]?ts$|\.spec\.[cm]?ts$/.test(p);
+  return /(^|\/)(test|tests|test-d|__tests__)(\/|$)/.test(p) || /\.test\.[cm]?[jt]s$|\.spec\.[cm]?[jt]s$/.test(p);
 }
 
 function callLLM(prompt) {
+  // P2-4-1：LLM CLI 在隔离临时空目录运行（cwd 无仓库/宿主项目上下文）
   const sandboxDir = mkdtempSync(path.join(tmpdir(), "ctt-llm-"));
   let out;
   try {
@@ -55,22 +59,21 @@ function callLLM(prompt) {
       encoding: "utf-8",
       timeout: LLM_TIMEOUT_MS,
       maxBuffer: 16 * 1024 * 1024,
-      shell: true, // Windows 下 opencode 为 .cmd shim；命令串固定，prompt 走 stdin
+      shell: true,
       stdio: ["pipe", "pipe", "pipe"],
       cwd: sandboxDir,
     });
   } catch (e) {
-    // opencode（Bun）退出时尾部异步 flush 可能 EPIPE 致非零退出码，但 stdout 已完整捕获
     if (e.stdout) { console.error("[llm-analyze] LLM 退出码非零但输出已捕获，继续"); return e.stdout; }
     throw e;
   } finally {
-    try { rmSync(sandboxDir, { recursive: true, force: true }); } catch { /* 清理尽力 */ }
+    try { rmSync(sandboxDir, { recursive: true, force: true }); } catch { /* 尽力 */ }
   }
   return out;
 }
 
 /** P2-4-1 输出侧防泄检测：LLM 输出含疑似宿主敏感内容时拒绝采纳（纵深防御第三层） */
-const LEAK_PATTERNS = /BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|ssh-rsa AAAA|ssh-ed25519 AAAA|aws_access_key_id|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|password\s*=\s*['"][^'"]{6,}/i;
+const LEAK_PATTERNS = /\bBEGIN (RSA|OPENSSH|EC) PRIVATE KEY\b|\bssh-rsa AAAA|\bssh-ed25519 AAAA|\baws_access_key_id\b|\bAKIA[0-9A-Z]{16}\b|\bghp_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{22,}\b|password\s*=\s*['"][^'"]{6,}/i;
 
 function scanForLeaks(text, label) {
   const hit = LEAK_PATTERNS.exec(text);
@@ -112,7 +115,7 @@ const SCHEMA_PROMPT = `你是一名资深代码架构分析师。基于下面提
 }
 
 硬性规则：
-0. 逐文件分析：对提供的每一个源文件，提取其核心行为/协议语义/特殊处理（一个文件至少 2 条 facts；与模块主题相关的关键机制不得遗漏）
+0. 逐文件分析：对提供的每一个源文件/源码片段，提取其核心行为/协议语义/特殊处理（与模块主题相关的关键机制不得遗漏）
 1. facts 只能陈述源码可直接证实的内容，evidence 的 file 必须来自实际提供的文件（路径原样引用，不加 ./ 前缀），lines 填真实行号范围
 2. 推断（设计意图、作者动机）只能放 inferences，不得混入 facts
 3. execution_flows 的每个步骤必须指向真实存在的代码位置；无法从源码确认的流程标 status 为 inferred 或不写
@@ -120,39 +123,79 @@ const SCHEMA_PROMPT = `你是一名资深代码架构分析师。基于下面提
 5. reuse_guidance 基于已见源码给出可移植部分/需适配部分/风险
 （prompt_version: ${PROMPT_VERSION}）`;
 
-const READ_MODE = process.env.CTT_READ_MODE || "full"; // full：整文件入 prompt；targeted：符号清单 + read_range 按需深读（P2-4-3）
+/** 两阶段 targeted：阶段一让 LLM 从符号清单规划要读的行段 */
+async function planReadRanges(mod, fileSummaries) {
+  const planPrompt = `你是代码分析规划员。下面是模块内各文件的符号清单（符号+行号）。为分析该模块的核心机制，选择最值得读取的代码行段（每段至多 200 行，总计至多 12 段）。
+
+只输出 JSON：{"requests": [{"path": "文件路径", "from": 起始行, "to": 结束行, "reason": "要看的机制"}]}
+
+## 模块
+${mod.id}: ${mod.summary || ""}
+
+## 符号清单
+${fileSummaries.join("\n\n")}`;
+  const plan = extractJson(callLLM(planPrompt));
+  return Array.isArray(plan.requests) ? plan.requests.slice(0, 12) : [];
+}
 
 async function analyzeModule(mod) {
-  const fileContents = [];
-  const readFiles = [];
-
   if (READ_MODE === "targeted" && ctx.symbols) {
-    // 两阶段：第一阶段只给符号清单（文件+符号+行号），Agent 判断后按需 read_range
+    const fileSummaries = [];
     for (const f of mod.source_files) {
-      if (!ctx.symbols[f]) continue; // 无符号表的文件退化为整读
-      const budget = isTestFile(f) ? MAX_TEST_CHARS : MAX_CORE_CHARS;
-      readFiles.push(f);
-      const sym = ctx.symbols[f];
-      fileContents.push(
-        `### 文件 ${f}（符号清单，共 ${sym.length} 个符号；可用 read_range 协议按需读取具体行段）\n` +
-        sym.slice(0, 60).map((s) => `  L${s.line} ${s.kind} ${s.name}`).join("\n")
-      );
+      if (!ctx.symbols[f]) continue;
+      fileSummaries.push(`### 文件 ${f}（${ctx.symbols[f].length} 个符号）\n` +
+        ctx.symbols[f].slice(0, 60).map((s) => `  L${s.line} ${s.kind} ${s.name}`).join("\n"));
     }
-  } else {
-    for (const f of mod.source_files) {
-      const resp = await readViaProtocol(f);
-      if (resp && resp.ok) {
-        readFiles.push(f);
-        const budget = isTestFile(f) ? MAX_TEST_CHARS : MAX_CORE_CHARS;
-        const isTest = isTestFile(f);
-        const truncated = resp.content.length > budget;
-        fileContents.push(
-          `### 文件 ${f}${isTest ? "（测试文件，已降权截断：用于验证行为，非核心实现）" : ""}${truncated ? "（内容超预算已截断，截断处之后不可作为证据）" : ""}\n` +
-          (truncated ? resp.content.slice(0, budget) + "\n...[已截断]" : resp.content)
-        );
+    if (fileSummaries.length) {
+      // 两阶段（评审 P0-1 修复）：符号清单 -> LLM 规划 -> 受控协议实读 -> 二次 LLM 基于真实片段生成
+      const requests = await planReadRanges(mod, fileSummaries);
+      console.error(`[llm-analyze] ${mod.id} targeted 规划 ${requests.length} 个行段，协议实读...`);
+      const fileContents = [];
+      const readFiles = [];
+      const readRanges = [];
+      for (const req of requests) {
+        const resp = await readViaProtocol(String(req.path), Number(req.from), Number(req.to));
+        if (resp && resp.ok) {
+          if (!readFiles.includes(resp.path)) readFiles.push(resp.path);
+          readRanges.push({ file: resp.path, from: resp.from, to: resp.to });
+          fileContents.push(`### 文件 ${resp.path} 行 ${resp.from}-${resp.to}（实际读取的源码）\n${resp.content}`);
+        } else {
+          console.error(`[llm-analyze] 行段读取失败 ${req.path}:${req.from}-${req.to}`);
+        }
       }
+      if (readRanges.length) {
+        return finalizeAnalysis(mod, fileContents, readFiles, readRanges);
+      }
+      console.error(`[llm-analyze] ${mod.id} targeted 无可用行段，退化整读`);
     }
   }
+
+  // full 模式 / targeted 退化：整文件读取
+  const fileContents = [];
+  const readFiles = [];
+  for (const f of mod.source_files) {
+    const resp = await readViaProtocol(f);
+    if (resp && resp.ok) {
+      readFiles.push(f);
+      const budget = isTestFile(f) ? MAX_TEST_CHARS : MAX_CORE_CHARS;
+      const isTest = isTestFile(f);
+      const truncated = resp.content.length > budget;
+      fileContents.push(
+        `### 文件 ${f}${isTest ? "（测试文件，已降权截断：用于验证行为，非核心实现）" : ""}${truncated ? "（内容超预算已截断，截断处之后不可作为证据）" : ""}\n` +
+        (truncated ? resp.content.slice(0, budget) + "\n...[已截断]" : resp.content)
+      );
+    }
+  }
+  return finalizeAnalysis(mod, fileContents, readFiles, []);
+}
+
+async function finalizeAnalysis(mod, fileContents, readFiles, readRanges) {
+  const rangeNote = readRanges.length
+    ? `
+
+## 证据边界（targeted 两阶段）
+你只实际读取了以下行段：${readRanges.map((r) => `${r.file}:${r.from}-${r.to}`).join("、")}。facts 的 evidence 行号必须落在此范围内；范围外的行为只能进 open_questions，不得臆测。`
+    : "";
 
   const prompt = `${SCHEMA_PROMPT}
 
@@ -162,16 +205,13 @@ name: ${mod.name}
 summary_seed: ${mod.summary || "(无)"}
 声明的依赖模块: ${(mod.dependencies || []).join(", ") || "(无)"}
 
-## 模块源码（共 ${fileContents.length} 个文件，行号从 1 开始）
-${fileContents.join("\n\n")}${READ_MODE === "targeted" && ctx.symbols ? `
-
-## 按需深读
-上述为符号清单。你必须先确定与模块能力相关的关键符号，再通过 read_range 协议读取其行段（每次至多 200 行）获取源码细节；evidence 行号必须来自实际读到的行段。关键机制的 facts 不得凭符号名臆测。` : ""}
+## 模块源码（${fileContents.length} 个文件，行号从 1 开始）
+${fileContents.join("\n\n")}${rangeNote}
 
 ## 输出
 只输出上述结构的 JSON。`;
 
-  console.error(`[llm-analyze] 分析模块 ${mod.id}（${readFiles.length} 文件，prompt ${Math.round(prompt.length / 1024)}KB）...`);
+  console.error(`[llm-analyze] 分析模块 ${mod.id}（${readFiles.length} 文件，prompt ${Math.round(prompt.length / 1024)}KB${readRanges.length ? `，targeted ${readRanges.length} 行段` : ""}）...`);
   let raw = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -200,11 +240,12 @@ ${fileContents.join("\n\n")}${READ_MODE === "targeted" && ctx.symbols ? `
       dependencies: { internal_files: [], external_packages: [] },
       inferences: [], reuse_guidance: { portable: [], adapt: [], risks: [] },
       open_questions: ["LLM 输出不可解析，本模块分析失败（诚实降级，非编造）"],
-      read_files: readFiles,
+      read_files: readFiles, read_ranges: readRanges,
     };
   }
-  // 规范化与结构补齐走共享模块（与离线验证同一路径）
-  return normalizeAnalysis(raw, mod, new Set(ctx.whitelist), readFiles);
+  const normalized = normalizeAnalysis(raw, mod, new Set(ctx.whitelist), readFiles);
+  normalized.read_ranges = readRanges; // 证据边界审计：实际读取的行段随产物落盘
+  return normalized;
 }
 
 async function main() {
@@ -218,7 +259,7 @@ async function main() {
       schema_version: "1.0",
       repository: ctx.repository,
       commit: ctx.commit,
-      generated_by: "llm-analyze (opencode, content-isolated)",
+      generated_by: `llm-analyze (${READ_MODE} mode, content-isolated)`,
       analyses,
     }, null, 2),
   });
