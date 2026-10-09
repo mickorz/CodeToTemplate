@@ -180,7 +180,13 @@ export function createMcpServer(options: McpOptions = {}): McpServer {
 // --- 直跑（stdio server）---
 const isMain = process.argv[1]?.endsWith("server.ts");
 if (isMain) {
-  const server = createMcpServer();
+  // 直跑模式：knowledgeRoot 可由 argv[2] 或环境变量指定；reposRoot 必须指向 CodeToTemplate 根
+  // （MCP server 可能被外部 Agent 在任意 cwd 拉起，相对路径不可靠）
+  process.env.CTT_KNOWLEDGE_ROOT = process.env.CTT_KNOWLEDGE_ROOT ?? process.argv[2] ?? "./knowledge";
+  const server = createMcpServer({
+    knowledgeRoot: process.env.CTT_KNOWLEDGE_ROOT,
+    reposRoot: process.env.CTT_REPOS_ROOT ?? "./cache/repos",
+  });
   await server.connect(new StdioServerTransport());
-  console.error(`[mcp] CodeToTemplate MCP Server 已启动（knowledge: ${knowledgeRoot}）`);
+  console.error(`[mcp] CodeToTemplate MCP Server 已启动（knowledge: ${path.resolve(process.env.CTT_KNOWLEDGE_ROOT!)}）`);
 }
