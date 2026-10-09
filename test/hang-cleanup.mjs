@@ -14,6 +14,13 @@ const { runAgent } = await import("../src/discovery/runner.ts");
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+// P2 第六轮 P1：平台守卫——tasklist/PING 检查仅 Windows 有效；Linux 下跳过真实验证并明确标注
+// （Ubuntu CI 的通过不能证明 Windows 进程回收，Windows 验证由 CI 的 windows-latest job 承担）
+if (process.platform !== "win32") {
+  console.log("[跳过] 进程树清理验证仅支持 Windows（Linux 由 CI windows job 覆盖；Unix 进程组清理为独立待办）");
+  process.exit(0);
+}
+
 const countPing = () => {
   try {
     const out = execFileSync("tasklist", ["/FI", "IMAGENAME eq PING.EXE"], { encoding: "utf-8" });

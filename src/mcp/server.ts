@@ -14,7 +14,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { searchCapabilities } from "../catalog/search.ts";
@@ -23,6 +23,19 @@ import { buildReferenceContext } from "../reference/builder.ts";
 
 function readdirSafe(p: string): string[] {
   try { return readdirSync(p); } catch { return []; }
+}
+
+/** P2 第六轮 P1：MCP 调用审计（每次工具调用记录成功/失败与关键参数，供实验与安全复盘） */
+function audit(tool: string, ok: boolean, detail: Record<string, unknown>): void {
+  try {
+    const dir = path.join(knowledgeRoot, "..");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(
+      path.join(dir, "mcp-audit.jsonl"),
+      JSON.stringify({ at: new Date().toISOString(), tool, ok, ...detail }) + "\n",
+      "utf-8",
+    );
+  } catch { /* 审计失败不阻断工具 */ }
 }
 
 const knowledgeRoot = path.resolve(process.argv[2] ?? "./knowledge");
@@ -170,8 +183,14 @@ export function createMcpServer(options: McpOptions = {}): McpServer {
       to_line: z.number().optional(),
     },
   }, async ({ repo, commit, file, from_line, to_line }) => {
-    const r = readSourceReference(knowledgeRoot, reposRoot, repo, commit, file, from_line, to_line);
-    return { content: [{ type: "text", text: `${r.note}\n\n${r.content}` }] };
+    try {
+      const r = readSourceReference(knowledgeRoot, reposRoot, repo, commit, file, from_line, to_line);
+      audit("read_source_reference", true, { repo, commit: commit.slice(0, 10), file, from: from_line ?? 1, to: to_line ?? null });
+      return { content: [{ type: "text", text: `${r.note}\n\n${r.content}` }] };
+    } catch (e) {
+      audit("read_source_reference", false, { repo, commit: commit.slice(0, 10), file, error: String((e as Error).message).slice(0, 120) });
+      throw e;
+    }
   });
 
   return server;

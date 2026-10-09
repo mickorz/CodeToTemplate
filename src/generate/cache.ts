@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
-import { PROMPT_VERSION } from "./normalize.ts";
+import { PROMPT_VERSION, ANALYSIS_PROTOCOL } from "./normalize.ts";
 import type { Manifest } from "../collector/manifest.ts";
 
 export interface JournalEntry {
@@ -43,6 +43,8 @@ export function computeCacheKey(
       source_blobs: blobs,
       agent: agentCmd,
       prompt_version: PROMPT_VERSION,
+      analysis_protocol: ANALYSIS_PROTOCOL, // P2 第六轮 P0：分析方式变更自动失效旧缓存
+      read_mode: process.env.CTT_READ_MODE || "full",
       schema_version: "1.0",
     }))
     .digest("hex")

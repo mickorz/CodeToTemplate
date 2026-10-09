@@ -7,7 +7,10 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest] # P2 第六轮：Windows 进程回收验证需真实 Windows 环境
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,4 +19,5 @@ jobs:
       - run: npm install --no-fund --no-audit
       - run: npm run typecheck
       # 测试全部自包含（test/fixtures/），干净环境无 cache/knowledge 可跑
+      # hang-cleanup 在 Windows 上真实验证嵌套进程树回收；Linux 上自动跳过并标注
       - run: npm test

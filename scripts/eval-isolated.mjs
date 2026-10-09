@@ -33,7 +33,15 @@ function findInWorkspace(names) {
   }
   return hits;
 }
-const hiddenNames = existsSync(hiddenDir) ? readdirSync(hiddenDir).filter((f) => f.endsWith(".test.ts") || f.endsWith(".test.mjs")) : [];
+const hiddenNames = existsSync(hiddenDir)
+  ? readdirSync(hiddenDir).filter((f) => f.endsWith(".test.ts") || f.endsWith(".test.mjs"))
+  : [];
+
+// P2 第六轮 P1：fail-close —— 隐藏测试目录不存在或为空时直接失败（防空测试集误报成功）
+if (!existsSync(hiddenDir) || hiddenNames.length === 0) {
+  console.error(`[失败] 隐藏测试目录无效或为空: ${hiddenDir}（评测器拒绝运行，防误报）`);
+  process.exit(2);
+}
 
 if (mode === "--check-only") {
   const leaked = findInWorkspace(hiddenNames);
@@ -49,6 +57,8 @@ if (existsSync(firstRunPath)) {
   console.error(`[拒绝] 首跑结果已存在: ${firstRunPath}（不可覆盖；新实验请使用新 workspace）`);
   process.exit(1);
 }
+
+// 独占创建（wx）：即使存在检查与写入之间发生并发，也不允许覆盖首跑结果
 
 // 拷入 -> 首跑 -> 移出
 mkdirSync(path.join(ws, "test"), { recursive: true });
@@ -69,7 +79,12 @@ try {
   for (const name of hiddenNames) rmSync(path.join(ws, "test", name), { force: true });
 }
 
-writeFileSync(firstRunPath, JSON.stringify(result, null, 2), "utf-8");
+try {
+  writeFileSync(firstRunPath, JSON.stringify(result, null, 2), { encoding: "utf-8", flag: "wx" });
+} catch {
+  console.error(`[拒绝] 首跑结果写入时发现已存在（独占创建失败）: ${firstRunPath}`);
+  process.exit(1);
+}
 console.log(`[首跑] pass=${result.pass} fail=${result.fail} -> ${firstRunPath}`);
 console.log(`[首跑] 隐藏测试已移出 workspace（下次评测前可用 --check-only 复核）`);
 process.exit(result.fail > 0 ? 1 : 0);

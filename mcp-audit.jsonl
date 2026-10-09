@@ -1,0 +1,11 @@
+{"at":"2026-10-09T09:15:30.996Z","tool":"read_source_reference","ok":true,"repo":"testrepo","commit":"cfd0dacf0a","file":"source/index.ts","from":1,"to":null}
+{"at":"2026-10-09T09:15:30.999Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"ffffffffff","file":"source/index.ts","error":"commit 不匹配：知识库锁定 cfd0dacf0a，请求 ffffffffff（拒绝读取未锁定版本）"}
+{"at":"2026-10-09T09:15:31.001Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"cfd0dacf0a","file":"etc/passwd","error":"文件不在 manifest 白名单: etc/passwd"}
+{"at":"2026-10-09T09:15:39.459Z","tool":"read_source_reference","ok":true,"repo":"testrepo","commit":"55e6459823","file":"source/index.ts","from":1,"to":null}
+{"at":"2026-10-09T09:15:39.462Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"ffffffffff","file":"source/index.ts","error":"commit 不匹配：知识库锁定 55e6459823，请求 ffffffffff（拒绝读取未锁定版本）"}
+{"at":"2026-10-09T09:15:39.464Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"55e6459823","file":"etc/passwd","error":"文件不在 manifest 白名单: etc/passwd"}
+{"at":"2026-10-09T09:28:20.315Z","tool":"read_source_reference","ok":false,"repo":"y-protocols","commit":"73b2ff7548","file":"src/awareness.js","error":"git show 读取失败（本地缓存可能无该 commit，先 collect 该仓库）: Command failed: git -C E:\\OtherProjects\\CodeToTemplate\\cache\\repos\\y-proto"}
+{"at":"2026-10-09T09:28:21.157Z","tool":"read_source_reference","ok":false,"repo":"y-protocols","commit":"73b2ff7548","file":"src/awareness.js","error":"git show 读取失败（本地缓存可能无该 commit，先 collect 该仓库）: Command failed: git -C E:\\OtherProjects\\CodeToTemplate\\cache\\repos\\y-proto"}
+{"at":"2026-10-09T12:37:01.530Z","tool":"read_source_reference","ok":true,"repo":"testrepo","commit":"6ffa3efd4c","file":"source/index.ts","from":1,"to":null}
+{"at":"2026-10-09T12:37:01.535Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"ffffffffff","file":"source/index.ts","error":"commit 不匹配：知识库锁定 6ffa3efd4c，请求 ffffffffff（拒绝读取未锁定版本）"}
+{"at":"2026-10-09T12:37:01.537Z","tool":"read_source_reference","ok":false,"repo":"testrepo","commit":"6ffa3efd4c","file":"etc/passwd","error":"文件不在 manifest 白名单: etc/passwd"}

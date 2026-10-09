@@ -29,6 +29,49 @@ export interface ModuleAnalysis {
   open_questions: string[];
   /** 分析过程中实际读取过的文件（facts 引用范围的上界） */
   read_files: string[];
+  /** targeted 模式：实际读取的行段（证据行级边界）；full 模式为空数组（整文件读取） */
+  read_ranges?: Array<{ file: string; from: number; to: number }>;
+}
+
+/**
+ * 证据行级契约（P2 第六轮评审 P0）：verified facts 的证据行号必须落在实际读取范围内。
+ * - targeted（read_ranges 非空）：每条 evidence 行号必须在对应文件的实读行段内
+ * - full（read_ranges 空）：文件级读取，行号仅需文件在 read_files 内
+ * - runnerLog 可选：受控协议的真实读取日志，用于交叉验证 Agent 自报的 read_ranges 非伪造
+ */
+export function validateEvidenceRanges(
+  analysis: ModuleAnalysis,
+  runnerReadLog: string[] = [],
+): { ok: boolean; errors: string[] } {
+  const errors: string[] = [];
+  const ranges = analysis.read_ranges ?? [];
+
+  // 交叉验证：Agent 自报行段必须出现在 Runner 真实读取日志中（防伪造读取记录）
+  if (ranges.length && runnerReadLog.length) {
+    const realReads = new Set(runnerReadLog);
+    for (const r of ranges) {
+      const asRange = `${r.file}:${r.from}-${r.to}`;
+      const asFile = r.file;
+      if (!realReads.has(asRange) && !realReads.has(asFile)) {
+        errors.push(`read_ranges 与 Runner 实际读取日志不符: ${asRange}（疑似伪造读取记录）`);
+      }
+    }
+  }
+
+  const readSet = new Set(analysis.read_files ?? []);
+  for (const f of analysis.facts ?? []) {
+    for (const ev of f.evidence ?? []) {
+      if (!ev.file || !readSet.has(ev.file)) continue; // 文件级问题由主契约处理
+      if (ev.lines && ranges.length) {
+        const line = ev.lines[0];
+        const covered = ranges.some((r) => r.file === ev.file && line >= r.from && line <= r.to);
+        if (!covered) {
+          errors.push(`fact「${String(f.statement).slice(0, 40)}」证据 ${ev.file}:${line} 超出实际读取行段（证据行级违规）`);
+        }
+      }
+    }
+  }
+  return { ok: errors.length === 0, errors };
 }
 
 export interface AnalysisContractResult {

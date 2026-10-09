@@ -23,7 +23,7 @@ import path from "node:path";
 import type { Manifest } from "../collector/manifest.ts";
 import { runAgent, type AgentRunResult } from "../discovery/runner.ts";
 import { ProcessSupervisor } from "../discovery/kill.ts";
-import { validateModuleAnalysis } from "./analysis-contract.ts";
+import { validateModuleAnalysis, validateEvidenceRanges } from "./analysis-contract.ts";
 import { normalizeAnalysis } from "./normalize.ts";
 import { computeCacheKey, readCache, writeCache, appendJournal, type JournalEntry } from "./cache.ts";
 
@@ -119,7 +119,8 @@ export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResu
         console.log(`[引擎] 分析模块 ${mod.id}（${mod.source_files.length} 文件）...`);
         run = await runAgent(opts.agentScript, moduleCtxPath, repoDir, whitelist, (pid) => { supervisor.register(pid); });
       } finally {
-        // 子进程已随 runAgent 返回而退出；已死 pid 对 killAll 无害，无需精确摘除
+        // P2 第六轮 P1：进程退出后精确注销（防 PID 复用后 killAll 误杀无关进程）
+        if (run) supervisor.unregister(run.pid);
       }
 
       if (interrupted) {
@@ -160,7 +161,11 @@ export async function runGenerateEngine(opts: EngineOptions): Promise<EngineResu
         const readFiles = rawAnalysis.read_files ?? mod.source_files;
         const normalized = normalizeAnalysis(rawAnalysis, mod, whitelist, readFiles);
         const contract = validateModuleAnalysis(JSON.stringify(normalized), whitelist);
-        // 降级检测：Agent 声明 LLM 输出不可解析的空分析，视为失败不入缓存（避免缓存掩塑失败）
+        // P2 第六轮 P0：证据行级契约 + Runner 真实读取日志交叉验证（确定性拒绝，不依赖 prompt 约束）
+        const rangeCheck = validateEvidenceRanges(normalized, run.readLog);
+        if (!rangeCheck.ok) {
+          contract.errors.push(...rangeCheck.errors);
+        }
         const degraded = (normalized.open_questions ?? []).some((q: string) => String(q).includes("LLM 输出不可解析"));
         if (degraded) {
           const dbgDir = path.join(knowledgeDir, "analysis-debug");

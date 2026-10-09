@@ -24,6 +24,8 @@ export interface AgentRunResult {
   error: string | null;
   /** Agent 经协议读取的文件清单（审计用） */
   readLog: string[];
+  /** 子进程 pid（供调用方在进程退出后精确注销，防 PID 复用误杀） */
+  pid: number | undefined;
 }
 
 const PROTOCOL_IDLE_TIMEOUT_MS = Number(process.env.CTT_AGENT_IDLE_TIMEOUT_MS) || 20 * 60 * 1000; // 活动感知：收到 Agent 消息即重置；可用环境变量覆盖（测试用）
@@ -47,12 +49,12 @@ export function runAgent(
     let output: string | null = null;
     let settled = false;
 
-    const finish = (result: Omit<AgentRunResult, "readLog">) => {
+    const finish = (result: Omit<AgentRunResult, "readLog" | "pid">) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       killTree(child.pid); // P0-2 修复：统一树清理（child.kill 在 Windows 杀不干净嵌套后代）
-      resolve({ ...result, readLog });
+      resolve({ ...result, readLog, pid: child.pid ?? undefined });
     };
 
     // 活动感知超时：任何 stdout 消息（协议请求/日志/done）都重置计时器

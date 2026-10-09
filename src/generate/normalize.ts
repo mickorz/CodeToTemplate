@@ -7,8 +7,11 @@
 
 import path from "node:path";
 
-/** prompt 结构版本：prompt/schema 变更时递增使缓存失效 */
-export const PROMPT_VERSION = "p1-4-r1";
+/** 分析协议版本：prompt/schema/分析方式变更时递增使缓存失效
+ * p2-4-r2：targeted 重构为真两阶段（旧 targeted 产物无真实读取，全部失效）；逐文件提取规则纳入 */
+export const PROMPT_VERSION = "p2-4-r2";
+/** 分析协议标识（区别 read 模式，参与缓存键） */
+export const ANALYSIS_PROTOCOL = "two-stage-v1";
 
 /** 规范化单模块分析：结构缺省补齐 + 相对路径解析到白名单 */
 export function normalizeAnalysis(
