@@ -8,8 +8,8 @@
 import { createHash } from "node:crypto";
 import type { ModuleAnalysis } from "../generate/analysis-contract.ts";
 
-/** 机制关键词（与 cmdReview 一致：送审抽样范围） */
-const MECH = /并发|concurren|优先|priority|超时|timeout|暂停|pause|速率|rate|调度|queue|重试/i;
+/** 能力关键词（与能力词典联动：送审抽样覆盖全部可检索能力领域，确保可信证据面与检索面一致） */
+const MECH = /并发|concurren|优先|priority|超时|timeout|暂停|pause|速率|rate|调度|queue|重试|限流|令牌桶|token bucket|流控|throttle|reservoir|配额|quota|进程隔离|崩溃|退避|backoff|重启|监护|桥接|IPC|窗口|打包|asar|签名/i;
 
 export function buildClaimsForReview(a: any): string[] {
   return [

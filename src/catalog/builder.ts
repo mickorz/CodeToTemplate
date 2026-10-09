@@ -31,7 +31,7 @@ export const CAPABILITY_DICT: Record<string, string[]> = {
   "priority-scheduling": ["优先", "priority"],
   "timeout-handling": ["超时", "timeout", "pTimeout"],
   "pause-resume": ["暂停", "pause", "恢复", "resume"],
-  "rate-limiting": ["速率", "rate limit", "rateLimit", "interval"],
+  "rate-limiting": ["速率", "rate limit", "rateLimit", "interval", "限流", "令牌桶", "token bucket", "流控", "throttle", "reservoir", "配额", "quota"],
   "process-isolation": ["进程隔离", "独立服务进程", "utilityProcess", "utility process", "子进程托管"],
   "crash-recovery": ["崩溃", "退避", "backoff", "重启", "supervisor", "监护"],
   "ipc-bridge": ["桥接", "bridge", "IPC", "消息协议", "call.*ret"],
@@ -64,15 +64,21 @@ export interface Catalog {
 }
 
 function evidenceLines(a: ModuleAnalysis, keywordRe: RegExp, verdictMap?: Map<string, string>): CapabilityEntry["modules"][0]["evidence"] {
-  const hits: CapabilityEntry["modules"][0]["evidence"] = [];
+  // P2 第四轮：证据选样优先取已获 supported verdict 的事实（可信证据优先），未送审事实仅在不足时补充
+  const matched: Array<{ f: ModuleAnalysis["facts"][number]; supported: boolean }> = [];
   for (const f of a.facts ?? []) {
     if (verdictMap?.get(f.statement) === "unsupported") continue; // claim 级过滤：被否决的事实不作证据
     if (keywordRe.test(f.statement) && f.evidence?.[0]) {
-      hits.push({ statement: f.statement.slice(0, 100), file: f.evidence[0].file, line: f.evidence[0].lines?.[0] });
+      matched.push({ f, supported: verdictMap?.get(f.statement) === "supported" });
     }
-    if (hits.length >= 3) break;
+    if (matched.length >= 8) break;
   }
-  return hits;
+  matched.sort((x, y) => Number(y.supported) - Number(x.supported)); // supported 优先，稳定排序
+  return matched.slice(0, 3).map(({ f }) => ({
+    statement: f.statement.slice(0, 100),
+    file: f.evidence[0].file,
+    line: f.evidence[0].lines?.[0],
+  }));
 }
 
 /** 从单个模块分析提取命中能力（P2 修复：inferences 移除；verdictMap 提供 claim 级审查，unsupported 事实不参与） */
@@ -119,10 +125,11 @@ export function buildCatalog(knowledgeRoot: string): Catalog {
       if (existsSync(reviewPath)) {
         try {
           const rr = JSON.parse(readFileSync(reviewPath, "utf-8"));
-          const reportPassed = rr.passed === true;
+          // claim 级可信（P2 第四轮）：不再要求报告整体 passed——个别被否决的结论已逐条排除；
+          // 有效性仅剩：commit 一致 + claims_hash 存在且匹配 + 模块状态有效
           const commitOk = typeof rr.commit === "string" && rr.commit === ma.commit;
           for (const entry of rr.llm ?? []) {
-            let valid = reportPassed && commitOk && entry?.review_status === "reviewed";
+            let valid = commitOk && entry?.review_status === "reviewed";
             if (valid) {
               if (typeof entry.claims_hash !== "string" || !entry.claims_hash) {
                 valid = false; // 缺指纹：旧格式，不可作为可信依据

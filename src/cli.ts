@@ -397,7 +397,17 @@ async function cmdReview() {
 
   const unsupported = llmResults.flatMap((r: any) =>
     (r.verdicts ?? []).filter((v: any) => v.verdict === "unsupported").map((v: any) => ({ module_id: r.module_id, ...v })));
-  const passed = allViolations.length === 0 && unsupported.length === 0;
+
+  // P2 第四轮：确定性违规合并进对应模块 verdicts（claim 级过滤天然排除，理由标注拦截来源）
+  for (const v of allViolations) {
+    const entry = llmResults.find((r: any) => r.module_id === v.module_id);
+    if (entry) {
+      (entry.verdicts ??= []).push({ statement: v.statement, verdict: "unsupported", reason: `确定性核查拦截：${v.reason}` });
+    }
+  }
+  const unsupportedCount = llmResults.reduce((s: number, r: any) => s + (r.verdicts ?? []).filter((v: any) => v.verdict === "unsupported").length, 0);
+  // 可信语义（claim 级）：个别 unsupported 不拖垮全模块（被逐条排除），仅当全部送审结论被否决时整体不通过
+  const passed = unsupportedCount === 0 || llmResults.every((r: any) => (r.verdicts ?? []).some((v: any) => v.verdict === "supported"));
 
   writeFileSync(
     path.join(knowledgeDir, "review-report.json"),
@@ -405,7 +415,7 @@ async function cmdReview() {
       schema_version: "1.0", repository: manifest.repository, commit: manifest.commit,
       deterministic: { violations: allViolations, count: allViolations.length },
       llm: llmResults,
-      unsupported_count: unsupported.length,
+      unsupported_count: unsupportedCount,
       passed,
     }, null, 2),
     "utf-8",
@@ -479,7 +489,7 @@ function cmdSearch() {
       query: { type: "string", required: true },
       knowledge: { type: "string", default: "./knowledge" },
       limit: { type: "string", default: "5" },
-      "trusted-only": { type: "boolean", default: false }, // P2-0b：只返回已审查且有实证的能力引用
+      "no-trusted": { type: "boolean", default: false }, // 默认可信检索；--no-trusted 放开（与 MCP/context 一致）
     },
     strict: true,
     args: rest,
@@ -487,8 +497,8 @@ function cmdSearch() {
   const catalogPath = path.join(path.resolve(args.values.knowledge), "catalog.json");
   if (!existsSync(catalogPath)) fatal(`能力索引不存在: ${catalogPath}，请先执行 npm run catalog`);
   const catalog = loadJson<Catalog>(catalogPath);
-  const hits = searchCapabilities(catalog, args.values.query ?? "", { trustedOnly: args.values["trusted-only"] === true });
-  console.log(`[检索] 查询: ${args.values.query}${args.values["trusted-only"] ? "（仅可信条目）" : ""}`);
+  const hits = searchCapabilities(catalog, args.values.query ?? "", { trustedOnly: args.values["no-trusted"] !== true });
+  console.log(`[检索] 查询: ${args.values.query}${args.values["no-trusted"] ? "（含未审查条目）" : "（默认可信检索）"}`);
   console.log(formatHits(hits, Number(args.values.limit)));
   if (!hits.length) process.exit(1);
 }

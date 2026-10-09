@@ -40,12 +40,13 @@ export function normalizeAnalysis(
     const candidates: string[] = [];
     // LLM 可能把依赖写成「路径 (中文说明)」混合串：取空白/括号前 token（仅精确命中白名单才算等价规范化，不做模糊猜测）
     const bare = f.split(/[\s(（]/)[0];
-    if (bare && bare !== f) candidates.push(bare, bare.replace(/\.js$/, ".ts"));
+    if (bare && bare !== f) candidates.push(bare, bare.replace(/\.js$/, ".ts"), `${bare}.js`, `${bare}.ts`);
     if (f.startsWith("./") || f.startsWith("../")) {
       const joined = path.posix.normalize(baseDir ? path.posix.join(baseDir, f) : f);
-      candidates.push(joined, joined.replace(/\.js$/, ".ts"));
+      candidates.push(joined, joined.replace(/\.js$/, ".ts"), `${joined}.js`, `${joined}.ts`, `${joined}/index.js`);
     } else {
-      candidates.push(f.replace(/^\.\//, ""));
+      const clean = f.replace(/^\.\//, "");
+      candidates.push(clean, `${clean}.js`, `${clean}.ts`); // CJS 无扩展名 require（lib/DLList -> lib/DLList.js）
     }
     candidates.push(f.replace(/\.js$/, ".ts"));
     for (const c of candidates) if (whitelist.has(c)) return c;

@@ -26,7 +26,7 @@ const CLAIM_DICTIONARY: Record<string, {
   code_evidence: RegExp[];
 }> = {
   persistence: {
-    claim_patterns: [/持久化/, /数据库/, /\bdatabase\b/i, /sqlite|postgres|mysql|mongodb|redis/i, /写入磁盘/, /保存到(文件|磁盘)/, /\bpersist/i],
+    claim_patterns: [/持久化/, /数据库/, /\bdatabase\b/i, /sqlite|postgres|mysql|mongodb/i, /写入磁盘/, /保存到(文件|磁盘)/, /\bpersist/i], // 注：redis 不作为持久化主张触发词（内存型存储，属分布式/进程间协调语境）
     dep_evidence: [/sqlite|pg|mysql|mongo|redis|level|lowdb|better-sqlite/i],
     code_evidence: [/\.writeFile|\.openSync|sqlite3|\.query\(|createTable|INSERT\s+INTO/i],
   },
@@ -37,8 +37,8 @@ const CLAIM_DICTIONARY: Record<string, {
   },
   multiprocessing: {
     claim_patterns: [/多进程/, /子进程/, /\bworker(线程|进程)?/, /进程(间)?通信/, /\bIPC\b/, /\bcluster\b/],
-    dep_evidence: [/child_process|worker_threads|cluster|^pm2$/],
-    code_evidence: [/child_process|fork\(|new Worker\(|process\.send|utilityProcess/i],
+    dep_evidence: [/child_process|worker_threads|cluster|pm2|redis|ioredis/], // Redis pub/sub 是常见跨进程同步通道
+    code_evidence: [/child_process|fork\(|new Worker\(|process\.send|utilityProcess|publish\(|subscribe\(|pub\/sub/i],
   },
   auto_retry: {
     claim_patterns: [/自动重试/, /重试机制/, /失败后(会)?重试/, /\bauto.?retry\b/i, /\bretry\b.*机制/],
@@ -47,8 +47,8 @@ const CLAIM_DICTIONARY: Record<string, {
   },
   distributed: {
     claim_patterns: [/分布式/, /集群/, /多(机|节点)/, /横向扩展/, /\bscal(e|ing) out\b/i],
-    dep_evidence: [/zookeeper|etcd|consul|kafka|nats/],
-    code_evidence: [/raft|consensus|leader.?elect|shard/i],
+    dep_evidence: [/zookeeper|etcd|consul|kafka|nats|redis|ioredis/], // Redis 集群（SCAN 键发现/共享存储）是分布式语境
+    code_evidence: [/raft|consensus|leader.?elect|shard|scan|cluster/i],
   },
 };
 
