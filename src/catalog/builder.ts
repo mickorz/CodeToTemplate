@@ -39,6 +39,7 @@ export const CAPABILITY_DICT: Record<string, string[]> = {
   "packaging": ["打包", "asar", "安装包", "electron-builder", "签名"],
   "event-system": ["事件", "EventEmitter", "emit", "监听器"],
   "abort-cancellation": ["中止", "abort", "AbortSignal", "取消"],
+  "presence-sync": ["在线状态", "presence", "协作", "光标", "cursor", "远端", "离线", "心跳", "awareness", "逻辑时钟", "vector clock"],
 };
 
 export interface CapabilityEntry {

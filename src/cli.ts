@@ -216,7 +216,11 @@ async function cmdGenerate() {
   const repoDir = path.join(CACHE_ROOT, "repos", manifest.repository.replace("/", "__"));
   if (!existsSync(repoDir)) fatal(`本地缓存仓库不存在: ${repoDir}，请先执行 collect`);
 
-  const moduleMapPath = path.resolve(args.values["module-map"] ?? path.join(knowledgeDir, "module-map.json"));
+  const defaultMap = path.join(knowledgeDir, "module-map.json");
+  const discoveryMap = path.join(knowledgeDir, "module-map.discovery.json");
+  const moduleMapPath = path.resolve(
+    args.values["module-map"] ?? (existsSync(defaultMap) ? defaultMap : (existsSync(discoveryMap) ? discoveryMap : defaultMap)),
+  );
   const moduleMap = loadJson<{ modules: any[] }>(moduleMapPath);
   const manifestPaths = new Set(manifest.files.map((f) => f.path));
   const modules = moduleMap.modules.map((m: any) => ({

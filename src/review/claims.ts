@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import type { ModuleAnalysis } from "../generate/analysis-contract.ts";
 
 /** 能力关键词（与能力词典联动：送审抽样覆盖全部可检索能力领域，确保可信证据面与检索面一致） */
-const MECH = /并发|concurren|优先|priority|超时|timeout|暂停|pause|速率|rate|调度|queue|重试|限流|令牌桶|token bucket|流控|throttle|reservoir|配额|quota|进程隔离|崩溃|退避|backoff|重启|监护|桥接|IPC|窗口|打包|asar|签名/i;
+const MECH = /并发|concurren|优先|priority|超时|timeout|暂停|pause|速率|rate|调度|queue|重试|限流|令牌桶|token bucket|流控|throttle|reservoir|配额|quota|进程隔离|崩溃|退避|backoff|重启|监护|桥接|IPC|窗口|打包|asar|签名|clock|时钟|离线|在线|远端|心跳|删除|事件|状态同步|冲突/i;
 
 export function buildClaimsForReview(a: any): string[] {
   return [
