@@ -118,13 +118,14 @@ MCPJSON
   # -- 隐藏测试首跑 --
   node "$ROOT/scripts/eval-isolated.mjs" "$ws" "$SHARED/hidden" > "$eval_log" 2>&1
   local eval_exit=$?
-  local first_run="$ws-first-run.json"
-  local eval_pass=0 eval_fail=-1  # -1 = 评测器异常
+  local first_run="$BASE_DIR/workspace-${group}-${SEQ}-first-run.json"
+  local eval_pass=0 eval_fail=-1
 
-  if [[ -f "$first_run" ]] && node -e "const r=require('$first_run');if(typeof r.pass!=='number')process.exit(1)" 2>/dev/null; then
-    eval_pass=$(node -pe "require('$first_run').pass")
-    eval_fail=$(node -pe "require('$first_run').fail")
-  else
+  if [[ -f "$first_run" ]]; then
+    eval_pass=$(cat "$first_run" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf-8')).pass" 2>/dev/null || echo 0)
+    eval_fail=$(cat "$first_run" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf-8')).fail" 2>/dev/null || echo -1)
+  fi
+  if [[ "$eval_fail" == "-1" ]]; then
     echo "[invalid-infra] 评测器未生成合法首跑成绩"
     write_result "$result_file" "$group" "$mode_env" "invalid-infra" "eval_no_result" 0 0 "$run_id" "$duration" "$audit_file" "$run_log" "$eval_log"
     return 0
@@ -214,13 +215,13 @@ write_result() {
 META
 }
 
-# ============ 运行五组 ============
+# ============ 运行五组（直接调用，避免平台差异）============
 PROMPTS="$SHARED/prompts"
-for entry in "a:":"$PROMPTS/prompt-a.txt" "b1:facts-only:$PROMPTS/prompt-b1.txt" "b2:facts-with-snippets:$PROMPTS/prompt-b2.txt" "b3:evidence-required:$PROMPTS/prompt-b3.txt" "c:":"$PROMPTS/prompt-c.txt"; do
-  IFS=':' read -r group mode <<< "$(echo "$entry" | cut -d: -f1-2)"
-  local_prompt=$(echo "$entry" | rev | cut -d: -f1 | rev)
-  run_group "$group" "$mode" "$local_prompt"
-done
+run_group "a"  ""                    "$PROMPTS/prompt-a.txt"
+run_group "b1" "facts-only"         "$PROMPTS/prompt-b1.txt"
+run_group "b2" "facts-with-snippets" "$PROMPTS/prompt-b2.txt"
+run_group "b3" "evidence-required"  "$PROMPTS/prompt-b3.txt"
+run_group "c"  ""                    "$PROMPTS/prompt-c.txt"
 
 # ============ 汇总 ============
 echo ""
@@ -229,7 +230,7 @@ echo "结果汇总（含状态分类）："
 for g in a b1 b2 b3 c; do
   f="$RESULTS/p3-${TASK}-${g}-${SEQ}.json"
   if [[ -f "$f" ]]; then
-    echo "  $g: $(node -pe "const r=require('$f');r.run_status+' '+r.eval_pass+'/'+(r.eval_pass+r.eval_fail)+(r.invalid_reason?' ('+r.invalid_reason+')':'')" 2>/dev/null || echo '读取失败')"
+    echo "  $g: $(cat "$f" | node -pe "const r=JSON.parse(require('fs').readFileSync(0,'utf-8'));r.run_status+' '+r.eval_pass+'/'+(r.eval_pass+r.eval_fail)+(r.invalid_reason?' ('+r.invalid_reason+')':'')" 2>/dev/null || echo '读取失败')"
   else
     echo "  $g: 未运行"
   fi
