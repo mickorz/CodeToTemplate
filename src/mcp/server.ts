@@ -93,7 +93,7 @@ function readSourceReference(kr: string, rr: string, repo: string, commit: strin
   };
 }
 
-function collectSnippets(kr: string, rr: string, ctx: any): string[] {
+function collectSnippets(kr: string, rr: string, ctx: any, onError?: (msg: string) => void): string[] {
   const snippets: string[] = [];
   for (const ref of ctx.references) {
     for (const fact of ref.facts ?? []) {
@@ -104,7 +104,9 @@ function collectSnippets(kr: string, rr: string, ctx: any): string[] {
       try {
         const r = readSourceReference(kr, rr, ref.repo, ref.commit, ev.file, from, to);
         snippets.push("### " + ref.repo + "/" + ev.file + ":" + from + "-" + to + "\n" + r.content);
-      } catch { /* skip */ }
+      } catch (e) {
+        onError?.(String((e as Error).message).slice(0, 80));
+      }
       if (snippets.length >= 10) return snippets;
     }
   }
@@ -148,7 +150,16 @@ export function createMcpServer(options: McpOptions = {}): McpServer {
         audit("build_reference_context", true, { query, references: 0, mode }, t0);
         return { content: [{ type: "text", text: "无可信模块命中: " + query }] };
       }
-      const snippets = mode === "facts-with-snippets" ? collectSnippets(kr, rr, ctx) : [];
+  // P3-0 修复：B2 片段缺失 Fail-Close——关键片段不足时在输出中显式标记，不静默降质为 B1
+      let snippetFailures = 0;
+      const snippets = mode === "facts-with-snippets" ? collectSnippets(kr, rr, ctx, (err) => { snippetFailures++; }) : [];
+      const expectedSnippets = mode === "facts-with-snippets" ? Math.min(ctx.references.reduce((s: number, r: any) => s + (r.facts ?? []).filter((f: any) => f.evidence?.[0]?.lines).length, 0), 10) : 0;
+      const snippetSufficient = mode !== "facts-with-snippets" || snippets.length >= Math.min(expectedSnippets, 3); // 至少 3 片段才算有效 B2
+      if (mode === "facts-with-snippets" && !snippetSufficient) {
+        const warn = "\n\n[警告] B2 模式片段不足（" + snippets.length + "/" + expectedSnippets + "，失败 " + snippetFailures + "），本次实验应标记 invalid";
+        audit("build_reference_context", true, { query, references: refs, mode, snippets: snippets.length, expected: expectedSnippets, snippet_failures: snippetFailures, snippet_sufficient: false }, t0);
+        return { content: [{ type: "text", text: "需求: " + query + "\n" + ctx.generated_note + warn }] };
+      }
       const evidencePrompt = mode === "evidence-required"
         ? "\n\n## 证据核对要求（evidence-required 模式）\n以上 facts 为结构化摘要。实现关键行为前，必须使用 read_source_reference 工具读取对应源码行段（按 facts 中标注的 file:line），确认语义与摘要一致后再实现。禁止仅凭摘要实现协议边界行为。"
         : "";

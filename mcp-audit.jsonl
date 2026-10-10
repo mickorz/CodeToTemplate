@@ -43,3 +43,17 @@
 {"at":"2026-10-09T13:01:32.350Z","run_id":null,"tool":"read_source_reference","ok":true,"duration_ms":65,"repo":"testrepo","commit":"8ee97b990a","file":"source/index.ts","range":[1,400],"total_lines":5,"bytes":80}
 {"at":"2026-10-09T13:01:32.352Z","run_id":null,"tool":"read_source_reference","ok":false,"duration_ms":0,"repo":"testrepo","commit":"ffffffffff","file":"source/index.ts","error":"commit 不匹配: 库锁 8ee97b990a 请求 ffffffffff"}
 {"at":"2026-10-09T13:01:32.354Z","run_id":null,"tool":"read_source_reference","ok":false,"duration_ms":1,"repo":"testrepo","commit":"8ee97b990a","file":"etc/passwd","error":"文件不在白名单: etc/passwd"}
+{"at":"2026-10-10T01:23:11.422Z","run_id":null,"tool":"search_capabilities","ok":true,"duration_ms":1,"query":"并发限制的调度器","hits":1,"bytes":128}
+{"at":"2026-10-10T01:23:11.432Z","run_id":null,"tool":"build_reference_context","ok":true,"duration_ms":3,"query":"并发限制调度器","references":1,"mode":"facts-only","snippets":0,"bytes":187}
+{"at":"2026-10-10T01:23:11.435Z","run_id":null,"tool":"get_module_analysis","ok":true,"duration_ms":1,"repo":"testrepo","module_id":"scheduling.core","facts":1,"bytes":746}
+{"at":"2026-10-10T01:23:11.437Z","run_id":null,"tool":"get_module_analysis","ok":false,"duration_ms":0,"repo":"../../etc","module_id":"x","error":"模块不存在"}
+{"at":"2026-10-10T01:23:11.502Z","run_id":null,"tool":"read_source_reference","ok":true,"duration_ms":64,"repo":"testrepo","commit":"065fdf6105","file":"source/index.ts","range":[1,400],"total_lines":5,"bytes":80}
+{"at":"2026-10-10T01:23:11.504Z","run_id":null,"tool":"read_source_reference","ok":false,"duration_ms":0,"repo":"testrepo","commit":"ffffffffff","file":"source/index.ts","error":"commit 不匹配: 库锁 065fdf6105 请求 ffffffffff"}
+{"at":"2026-10-10T01:23:11.506Z","run_id":null,"tool":"read_source_reference","ok":false,"duration_ms":1,"repo":"testrepo","commit":"065fdf6105","file":"etc/passwd","error":"文件不在白名单: etc/passwd"}
+{"at":"2026-10-10T01:23:18.206Z","run_id":null,"tool":"search_capabilities","ok":true,"duration_ms":1,"query":"并发限制的调度器","hits":1,"bytes":128}
+{"at":"2026-10-10T01:23:18.212Z","run_id":null,"tool":"build_reference_context","ok":true,"duration_ms":2,"query":"并发限制调度器","references":1,"mode":"facts-only","snippets":0,"bytes":187}
+{"at":"2026-10-10T01:23:18.214Z","run_id":null,"tool":"get_module_analysis","ok":true,"duration_ms":0,"repo":"testrepo","module_id":"scheduling.core","facts":1,"bytes":746}
+{"at":"2026-10-10T01:23:18.216Z","run_id":null,"tool":"get_module_analysis","ok":false,"duration_ms":0,"repo":"../../etc","module_id":"x","error":"模块不存在"}
+{"at":"2026-10-10T01:23:18.269Z","run_id":null,"tool":"read_source_reference","ok":true,"duration_ms":52,"repo":"testrepo","commit":"48b06bc90e","file":"source/index.ts","range":[1,400],"total_lines":5,"bytes":80}
+{"at":"2026-10-10T01:23:18.271Z","run_id":null,"tool":"read_source_reference","ok":false,"duration_ms":1,"repo":"testrepo","commit":"ffffffffff","file":"source/index.ts","error":"commit 不匹配: 库锁 48b06bc90e 请求 ffffffffff"}
+{"at":"2026-10-10T01:23:18.272Z","run_id":null,"tool":"read_source_reference","ok":false,"duration_ms":1,"repo":"testrepo","commit":"48b06bc90e","file":"etc/passwd","error":"文件不在白名单: etc/passwd"}
